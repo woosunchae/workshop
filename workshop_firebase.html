@@ -1,0 +1,1006 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>아이데이션 워크샵</title>
+<link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+<!-- ★ Firebase SDK -->
+<script type="module">
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+import { getDatabase, ref, push, set, onValue, update, remove }
+  from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js';
+
+// ════════════════════════════════════════════
+//  ★ 여기에 Firebase 설정을 붙여넣으세요 ★
+//  Firebase Console → 프로젝트 설정 → 앱 추가(웹) → firebaseConfig 복사
+// ════════════════════════════════════════════
+const firebaseConfig = {
+  apiKey:            "AIzaSyAUzKmUJTJbOPEVzdC2woy3OQ8bwsVgqyc",
+  authDomain:        "moonshot-workshop.firebaseapp.com",
+  databaseURL:       "https://moonshot-workshop-default-rtdb.firebaseio.com",
+  projectId:         "moonshot-workshop",
+  storageBucket:     "moonshot-workshop.firebasestorage.app",
+  messagingSenderId: "86329840069",
+  appId:             "1:86329840069:web:bab30266b864c10594fbac"
+};
+// ════════════════════════════════════════════
+
+const app = initializeApp(firebaseConfig);
+const db  = getDatabase(app);
+
+// ─── 전역 상태 ───
+let ideas    = {};   // { firebaseKey: ideaObj }
+let evals    = {};   // { firebaseKey: evalObj }
+let clusters = null;
+
+// ─── DB 실시간 리스닝 ───
+onValue(ref(db, 'ideas'),    snap => { ideas    = snap.val() || {}; refreshAll(); });
+onValue(ref(db, 'evals'),    snap => { evals    = snap.val() || {}; refreshAll(); });
+onValue(ref(db, 'clusters'), snap => { clusters = snap.val() || null; refreshAll(); });
+
+function refreshAll() {
+  const active = document.querySelector('.screen.active');
+  if(!active) return;
+  const id = active.id;
+  if(id==='screen-form')    { /* 입력화면은 자동갱신 없음 */ }
+  if(id==='screen-group')   renderGroup();
+  if(id==='screen-eval')    renderEval();
+  if(id==='screen-dash')    renderDash();
+  if(id==='screen-present') renderPresentSelector();
+  updateNavCounts();
+}
+
+function updateNavCounts() {
+  const arr = Object.values(ideas);
+  document.getElementById('nav-cnt-ideas').textContent = arr.length || '';
+  const evalArr = Object.values(evals);
+  document.getElementById('nav-cnt-evals').textContent = evalArr.length || '';
+}
+
+// ─── IDEA 제출 ───
+window.submitIdea = async function() {
+  const name     = document.getElementById('f-name').value.trim();
+  const group    = document.getElementById('f-group').value;
+  const title    = document.getElementById('f-title').value.trim();
+  const target   = window._tagVals?.target || document.getElementById('f-target').value.trim();
+  const problem  = document.getElementById('f-problem').value.trim();
+  const solution = document.getElementById('f-solution').value.trim();
+  const reasonTag  = window._tagVals?.reason || '';
+  const reasonText = document.getElementById('f-reason').value.trim();
+  const reason = [reasonTag, reasonText].filter(Boolean).join(' — ');
+
+  if(!name||!group||!title||!problem||!solution) {
+    alert('이름, 조, 제목, 문제, 해결방법은 필수입니다.'); return;
+  }
+  const btn = document.getElementById('submit-btn');
+  btn.disabled = true; btn.textContent = '제출 중...';
+  try {
+    await push(ref(db, 'ideas'), {
+      name, group, title, target, problem, solution, reason,
+      submittedAt: new Date().toISOString()
+    });
+    document.getElementById('form-body').style.display = 'none';
+    document.getElementById('success-view').style.display = 'block';
+  } catch(e) {
+    alert('제출 실패: ' + e.message);
+  }
+  btn.disabled = false; btn.textContent = '아이디어 제출하기 →';
+};
+
+window.resetForm = function() {
+  ['f-title','f-problem','f-solution','f-reason','f-target'].forEach(id => document.getElementById(id).value='');
+  document.querySelectorAll('.tag').forEach(t=>t.classList.remove('selected'));
+  window._tagVals = { target: null, reason: null };
+  timerSec = 300; startTimer();
+  document.getElementById('form-body').style.display='block';
+  document.getElementById('success-view').style.display='none';
+};
+
+// ─── EVAL 제출 ───
+window.submitEval = async function(ideaKey) {
+  const name  = document.getElementById('e-name').value.trim();
+  const group = document.getElementById('e-group').value;
+  if(!name||!group) { alert('이름과 조를 입력해주세요.'); return; }
+  const scores = window._evalScores?.[ideaKey] || {};
+  if(Object.keys(scores).length<4 || Object.values(scores).some(v=>!v)) {
+    alert('모든 항목에 점수를 입력해주세요.'); return;
+  }
+  const total = Object.values(scores).reduce((a,b)=>a+b,0);
+  const btn = document.getElementById('eval-submit-'+ideaKey);
+  if(btn) { btn.disabled=true; btn.textContent='제출 중...'; }
+  try {
+    await push(ref(db,'evals'), { ideaKey, name, group, scores, total, at: new Date().toISOString() });
+    if(btn) { btn.textContent='✓ 제출 완료'; btn.style.background='#065f46'; }
+  } catch(e) {
+    alert('저장 실패: '+e.message);
+    if(btn) { btn.disabled=false; btn.textContent='이 아이디어 평가 제출 →'; }
+  }
+};
+
+// ─── CLUSTERING (운영자용) ───
+window.runClustering = async function() {
+  const arr = Object.entries(ideas).map(([k,v])=>({key:k,...v}));
+  if(arr.length<3) { alert('아이디어가 3개 이상 필요합니다.'); return; }
+  const btn = document.getElementById('cluster-run-btn');
+  btn.disabled=true; btn.innerHTML='<span class="spinner"></span> AI 분석 중...';
+
+  const prompt = `다음은 워크샵 참가자들의 고객 문제 해결 아이디어입니다.
+
+${arr.map((idea,i)=>`[${i+1}] KEY:${idea.key} / [${idea.group}] ${idea.name}: ${idea.title} — 문제: ${idea.problem} / 해결: ${idea.solution}`).join('\n')}
+
+이 아이디어들을 주제(해결하려는 문제 유형)별로 3~6개 클러스터로 묶어주세요.
+반드시 아래 JSON 형식만 출력하세요. 다른 텍스트 없이:
+{
+  "clusters": [
+    {
+      "name": "클러스터 이름 (10자 이내)",
+      "desc": "한 줄 설명 (20자 이내)",
+      "keys": ["KEY1", "KEY2"]
+    }
+  ]
+}
+keys는 위 목록의 KEY 값을 그대로 사용하세요.`;
+
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ model:'claude-sonnet-4-20250514', max_tokens:1200,
+        messages:[{role:'user',content:prompt}] })
+    });
+    const data = await res.json();
+    const text = data.content.map(c=>c.text||'').join('');
+    const parsed = JSON.parse(text.replace(/```json|```/g,'').trim());
+    await set(ref(db,'clusters'), parsed.clusters);
+    alert('✅ 클러스터링 완료!');
+  } catch(e) { alert('오류: '+e.message); }
+  btn.disabled=false; btn.innerHTML='✦ 클러스터링 재실행';
+};
+
+// ─── 발표문 생성 (운영자용) ───
+window.generateAll = async function() {
+  const btn = document.querySelector('.generate-all-btn');
+  btn.textContent='생성 중...'; btn.disabled=true;
+  const d = getPresentData();
+  const prompt = `워크샵 아이디어 사업화 검토 발표 자료 내용을 보완해주세요.
+
+아이디어: ${d.title}
+타겟: ${d.target}
+고객문제: ${d.problem}
+해결방법: ${d.summary}
+기대효과: ${d.effect||'미작성'}
+실행계획: ${d.effort||'미작성'}
+예상비용: ${d.cost||'미작성'}
+리스크: ${d.risk||'미작성'}
+제안조직: ${d.org||'미작성'}
+전략이유: ${d.why||'미작성'}
+시장환경: ${d.market||'미작성'}
+성공조건: ${d.condition||'미작성'}
+
+미작성 항목은 아이디어 내용 기반으로 합리적으로 채워주세요.
+각 항목을 정확히 이 형식으로 구분하여 출력하세요:
+[기대효과]: 내용
+[실행계획]: 내용
+[비용]: 내용
+[리스크]: 내용
+[제안조직]: 내용
+[시장환경]: 내용
+[성공조건]: 내용
+[발표멘트]: 부사장님께 3분 발표할 구어체 멘트 (도입→핵심→효과→실행 순서로)`;
+
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ model:'claude-sonnet-4-20250514', max_tokens:1500,
+        messages:[{role:'user',content:prompt}] })
+    });
+    const data = await res.json();
+    const text = data.content.map(c=>c.text||'').join('');
+    const fieldMap = {
+      '기대효과':'ps-effect','실행계획':'ps-effort','비용':'ps-cost',
+      '리스크':'ps-risk','제안조직':'ps-org','시장환경':'ps-market','성공조건':'ps-condition'
+    };
+    Object.entries(fieldMap).forEach(([key,elId])=>{
+      const m = text.match(new RegExp(`\\[${key}\\]:\\s*([^\\[]*)`));
+      if(m){ const el=document.getElementById(elId); if(el&&!el.value.trim()) el.value=m[1].trim(); }
+    });
+    const mMsg = text.match(/\[발표멘트\]:\s*([\s\S]*)/);
+    if(mMsg){ const out=document.getElementById('ai-msg-output'); out.style.display='block'; out.textContent=mMsg[1].trim(); }
+  } catch(e) { alert('오류: '+e.message); }
+  btn.textContent='✦ AI로 전체 내용 보완하기'; btn.disabled=false;
+};
+
+// ─── 렌더 함수들 ───
+
+const COLORS = ['#4f8ef7','#6ee7b7','#f59e0b','#f87171','#a78bfa','#fb923c','#67e8f9'];
+const CRITERIA = [
+  { key:'c1', label:'고객 임팩트',  hint:'고객에게 얼마나 중요한 문제인가?' },
+  { key:'c2', label:'구현 가능성', hint:'현재 역량으로 실행 가능한가?' },
+  { key:'c3', label:'사업 성장성', hint:'매출/고객 확보에 기여 가능한가?' },
+  { key:'c4', label:'실행 속도',   hint:'6개월 내 시장에 낼 수 있는가?' },
+];
+
+function getIdeaArr()  { return Object.entries(ideas).map(([k,v])=>({key:k,...v})); }
+function getEvalArr()  { return Object.values(evals); }
+
+function getAvgScore(ideaKey) {
+  const sc = getEvalArr().filter(e=>e.ideaKey===ideaKey).map(e=>e.total);
+  return sc.length ? sc.reduce((a,b)=>a+b,0)/sc.length : null;
+}
+function getGrade(avg) {
+  if(avg===null) return '';
+  if(avg>=17) return '⭐ 최우선 추진';
+  if(avg>=13) return '✅ 추진 권장';
+  if(avg>=9)  return '🔄 추가 검토';
+  return '⏸ 보류';
+}
+
+// ── 조별 보기 ──
+window.renderGroup = function() {
+  const arr = getIdeaArr();
+  const selEl = document.getElementById('group-selector');
+  const current = selEl.dataset.current || '1조';
+  const groups = ['1조','2조','3조','4조','5조','6조','7조'];
+  selEl.innerHTML = groups.map(g=>`<button class="group-btn${g===current?' active':''}" onclick="selectGroup('${g}')">${g}</button>`).join('');
+  selEl.dataset.current = current;
+
+  const filtered = arr.filter(i=>i.group===current);
+  const statEl = document.getElementById('group-stats');
+  const evalArr = getEvalArr();
+  const evalCnt = evalArr.filter(e=>filtered.some(i=>i.key===e.ideaKey)).length;
+  const avgAll = filtered.length ? (() => {
+    const avgs = filtered.map(i=>getAvgScore(i.key)).filter(v=>v!==null);
+    return avgs.length ? (avgs.reduce((a,b)=>a+b,0)/avgs.length).toFixed(1) : '-';
+  })() : '-';
+
+  statEl.innerHTML = `
+    <div class="stat-card"><div class="num">${filtered.length}</div><div class="lbl">제출 아이디어</div></div>
+    <div class="stat-card"><div class="num">${avgAll}</div><div class="lbl">평균 점수</div></div>
+    <div class="stat-card"><div class="num">${evalCnt}</div><div class="lbl">평가 수</div></div>`;
+
+  const el = document.getElementById('group-ideas');
+  if(!filtered.length) { el.innerHTML='<div class="empty-msg">이 조의 아이디어가 없습니다.</div>'; return; }
+  el.innerHTML = filtered.map(idea=>{
+    const avg = getAvgScore(idea.key);
+    const evalEntries = getEvalArr().filter(e=>e.ideaKey===idea.key);
+    return `<div class="idea-card">
+      <div class="idea-card-top">
+        <div class="idea-title">${idea.title}</div>
+        <div class="idea-meta">
+          <span class="badge badge-group">${idea.group}</span>
+          ${idea.target?`<span class="badge badge-target">${idea.target}</span>`:''}
+          <span class="badge badge-name">${idea.name}</span>
+        </div>
+      </div>
+      <div class="idea-fields">
+        <div class="idea-field"><div class="idea-field-label">고객 문제</div><div class="idea-field-value">${idea.problem}</div></div>
+        <div class="idea-field"><div class="idea-field-label">해결 방법</div><div class="idea-field-value">${idea.solution}</div></div>
+        ${idea.reason?`<div class="idea-field full"><div class="idea-field-label">우리가 해야 하는 이유</div><div class="idea-field-value">${idea.reason}</div></div>`:''}
+      </div>
+      ${avg!==null?`<div class="score-display">
+        <div><div class="score-total">${avg.toFixed(1)}</div><div class="score-label">/ 20점 평균 (${evalEntries.length}명)</div></div>
+        <div class="score-breakdown">
+          ${CRITERIA.map(c=>{
+            const vals=evalEntries.map(e=>e.scores?.[c.key]||0).filter(v=>v>0);
+            const cAvg=vals.length?(vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(1):'-';
+            return `<div class="score-item">${c.label} <span>${cAvg}</span></div>`;
+          }).join('')}
+        </div>
+      </div>`:''}
+    </div>`;
+  }).join('');
+};
+
+window.selectGroup = function(g) {
+  document.getElementById('group-selector').dataset.current = g;
+  renderGroup();
+};
+
+// ── 평가 ──
+if(!window._evalScores) window._evalScores = {};
+
+window.renderEval = function() {
+  const el = document.getElementById('eval-cards');
+  const group = document.getElementById('e-group').value;
+  const notice = document.getElementById('eval-group-notice');
+  if(!group) {
+    el.innerHTML='<div class="empty-msg">위에서 내 조를 선택하면<br>우리 조의 아이디어가 표시됩니다.</div>';
+    if(notice) notice.style.display='none';
+    return;
+  }
+  const filtered = getIdeaArr().filter(i=>i.group===group);
+  if(notice) notice.style.display='block';
+  if(!filtered.length) { el.innerHTML=`<div class="empty-msg">${group}의 아이디어가 없습니다.<br>① 탭에서 먼저 아이디어를 제출해주세요.</div>`; return; }
+
+  el.innerHTML = filtered.map(idea=>{
+    const sc = window._evalScores[idea.key] || {};
+    const total = Object.values(sc).reduce((a,b)=>a+(b||0),0);
+    const grade = getGrade(total>=4?total:null);
+    return `<div class="eval-card">
+      <div class="eval-card-title">${idea.title}</div>
+      <div class="eval-card-sub">${idea.group} · ${idea.name}${idea.target?' · '+idea.target:''}</div>
+      <div class="criteria-grid">
+        ${CRITERIA.map(c=>`
+          <div class="criteria-item">
+            <label>${c.label}</label>
+            <div class="hint">${c.hint}</div>
+            <div class="score-input-row">
+              ${[1,2,3,4,5].map(n=>`<div class="score-btn${sc[c.key]===n?' sel':''}"
+                onclick="setEvalScore('${idea.key}','${c.key}',${n},this)">${n}</div>`).join('')}
+            </div>
+          </div>`).join('')}
+      </div>
+      <div class="eval-total-row">
+        <div>
+          <div class="eval-total-num" id="et-${idea.key}">${total||0}</div>
+          <div class="eval-total-label">/ 20점</div>
+        </div>
+        <div class="eval-total-grade" id="eg-${idea.key}">${grade}</div>
+      </div>
+      <button class="eval-submit-btn" id="eval-submit-${idea.key}" onclick="submitEval('${idea.key}')">이 아이디어 평가 제출 →</button>
+    </div>`;
+  }).join('');
+};
+
+window.setEvalScore = function(ideaKey, cKey, val, el) {
+  if(!window._evalScores[ideaKey]) window._evalScores[ideaKey]={};
+  window._evalScores[ideaKey][cKey]=val;
+  el.closest('.score-input-row').querySelectorAll('.score-btn').forEach(b=>b.classList.remove('sel'));
+  el.classList.add('sel');
+  const sc = window._evalScores[ideaKey];
+  const total = Object.values(sc).reduce((a,b)=>a+(b||0),0);
+  const tEl=document.getElementById('et-'+ideaKey); if(tEl) tEl.textContent=total;
+  const gEl=document.getElementById('eg-'+ideaKey); if(gEl) gEl.textContent=total>=4?getGrade(total):'';
+};
+
+// ── 대시보드 ──
+window.renderDash = function() {
+  const arr = getIdeaArr();
+  const evalArr = getEvalArr();
+  const groups = [...new Set(arr.map(i=>i.group))].length;
+  const scored = arr.filter(i=>evalArr.some(e=>e.ideaKey===i.key));
+
+  document.getElementById('dash-stats').innerHTML = `
+    <div class="stat-card"><div class="num" style="color:var(--accent)">${arr.length}</div><div class="lbl">전체 아이디어</div></div>
+    <div class="stat-card"><div class="num" style="color:var(--accent2)">${groups}</div><div class="lbl">참여 조</div></div>
+    <div class="stat-card"><div class="num" style="color:var(--accent3)">${evalArr.length}</div><div class="lbl">평가 수</div></div>
+    <div class="stat-card"><div class="num" style="color:#a78bfa">${scored.length}</div><div class="lbl">평가된 아이디어</div></div>`;
+
+  renderClusterSection(arr, evalArr);
+  renderRankingSection(arr);
+};
+
+function renderClusterSection(arr, evalArr) {
+  const el = document.getElementById('dash-clusters');
+  if(!arr.length) { el.innerHTML='<div class="empty-msg">제출된 아이디어가 없습니다.</div>'; return; }
+  if(!clusters || !Array.isArray(clusters)) {
+    // 조별 기본 표시
+    const byGroup = {};
+    arr.forEach(i=>{ if(!byGroup[i.group]) byGroup[i.group]=[]; byGroup[i.group].push(i); });
+    el.innerHTML = '<div style="font-size:12px;color:var(--text3);margin-bottom:12px">클러스터링 전 — 조별로 표시됩니다. 위 버튼으로 AI 클러스터링을 실행하세요.</div>'
+      + ['1조','2조','3조','4조','5조','6조','7조'].filter(g=>byGroup[g]?.length).map((g,gi)=>`
+        <div class="cluster-result-block">
+          <div class="cluster-group-header" style="background:${COLORS[gi]}18;border-color:${COLORS[gi]}44">
+            <span class="cluster-dot" style="background:${COLORS[gi]}"></span>
+            <span class="cluster-group-name" style="color:${COLORS[gi]}">${g}</span>
+            <span class="cluster-group-cnt">${byGroup[g].length}개</span>
+          </div>
+          <div class="cluster-group-ideas">
+            ${byGroup[g].map(idea=>{
+              const avg=getAvgScore(idea.key);
+              return `<div class="cluster-idea-row">
+                <span class="ci-title">${idea.title}</span>
+                <span class="ci-meta">${idea.name}</span>
+                ${avg!==null?`<span class="ci-score">${avg.toFixed(1)}점</span>`:''}
+              </div>`;
+            }).join('')}
+          </div>
+        </div>`).join('');
+    return;
+  }
+  el.innerHTML = `<div style="font-size:12px;color:var(--accent2);margin-bottom:12px">✦ AI 클러스터링 완료 — ${clusters.length}개 주제로 분류되었습니다.</div>`
+    + clusters.map((cl,ci)=>{
+      const clIdeas = arr.filter(i=>cl.keys?.includes(i.key));
+      return `<div class="cluster-result-block">
+        <div class="cluster-group-header" style="background:${COLORS[ci%COLORS.length]}18;border-color:${COLORS[ci%COLORS.length]}44">
+          <span class="cluster-dot" style="background:${COLORS[ci%COLORS.length]}"></span>
+          <span class="cluster-group-name" style="color:${COLORS[ci%COLORS.length]}">${cl.name}</span>
+          <span class="cluster-group-desc">${cl.desc||''}</span>
+          <span class="cluster-group-cnt">${clIdeas.length}개</span>
+        </div>
+        <div class="cluster-group-ideas">
+          ${clIdeas.map(idea=>{
+            const avg=getAvgScore(idea.key);
+            return `<div class="cluster-idea-row">
+              <span class="ci-title">${idea.title}</span>
+              <span class="ci-meta">${idea.group} · ${idea.name}</span>
+              ${avg!==null?`<span class="ci-score">${avg.toFixed(1)}점</span>`:''}
+            </div>`;
+          }).join('')}
+        </div>
+      </div>`;
+    }).join('');
+}
+
+function renderRankingSection(arr) {
+  const ranked = arr.map(idea=>{
+    const avg=getAvgScore(idea.key);
+    const cnt=getEvalArr().filter(e=>e.ideaKey===idea.key).length;
+    return {idea,avg,cnt};
+  }).filter(x=>x.cnt>0).sort((a,b)=>b.avg-a.avg);
+
+  const el = document.getElementById('dash-ranking');
+  if(!ranked.length) { el.innerHTML='<div class="empty-msg">평가 데이터가 없습니다.</div>'; return; }
+  el.innerHTML = `<table class="rank-table">
+    <tr><th>#</th><th>아이디어</th><th>조</th><th>제안자</th><th>평균</th><th>평가</th><th>판정</th></tr>
+    ${ranked.map(({idea,avg,cnt},i)=>`<tr>
+      <td><span class="rank-num${i<3?' top3':''}">${i+1}</span></td>
+      <td style="font-weight:500">${idea.title}</td>
+      <td>${idea.group}</td><td>${idea.name}</td>
+      <td style="font-weight:700;color:var(--accent3)">${avg.toFixed(1)}</td>
+      <td style="color:var(--text2)">${cnt}명</td>
+      <td>${getGrade(avg)}</td>
+    </tr>`).join('')}
+  </table>`;
+}
+
+// ── 발표 ──
+window.renderPresentSelector = function() {
+  const arr = getIdeaArr();
+  const sel = document.getElementById('present-selector');
+  sel.innerHTML = '<option value="">아이디어를 선택하세요</option>'
+    + arr.map(i=>`<option value="${i.key}">[${i.group}] ${i.title}</option>`).join('');
+};
+
+window.loadPresent = function() {
+  const key = document.getElementById('present-selector').value;
+  const idea = ideas[key];
+  const cont = document.getElementById('present-content');
+  if(!idea) { cont.style.display='none'; return; }
+  cont.style.display='block';
+  document.getElementById('ps-title').textContent = idea.title;
+  document.getElementById('ps-target').value  = idea.target||'';
+  document.getElementById('ps-problem').value = idea.problem||'';
+  document.getElementById('ps-why').value     = idea.reason||'';
+  ['ps-summary','ps-effect','ps-effort','ps-cost','ps-risk','ps-org','ps-market','ps-condition'].forEach(id=>{
+    document.getElementById(id).value='';
+  });
+  document.getElementById('ai-msg-output').style.display='none';
+};
+
+window.getPresentData = function() {
+  return {
+    title:     document.getElementById('ps-title').textContent,
+    summary:   document.getElementById('ps-summary').value,
+    target:    document.getElementById('ps-target').value,
+    problem:   document.getElementById('ps-problem').value,
+    effect:    document.getElementById('ps-effect').value,
+    effort:    document.getElementById('ps-effort').value,
+    cost:      document.getElementById('ps-cost').value,
+    risk:      document.getElementById('ps-risk').value,
+    org:       document.getElementById('ps-org').value,
+    why:       document.getElementById('ps-why').value,
+    market:    document.getElementById('ps-market').value,
+    condition: document.getElementById('ps-condition').value,
+  };
+};
+
+// ── 데이터 초기화 (운영자용) ──
+window.clearAllData = async function() {
+  if(!confirm('⚠️ 모든 데이터(아이디어, 평가, 클러스터)를 삭제합니다.\n워크샵 종료 후에만 사용하세요.')) return;
+  await Promise.all([
+    remove(ref(db,'ideas')),
+    remove(ref(db,'evals')),
+    remove(ref(db,'clusters')),
+  ]);
+  alert('삭제 완료');
+};
+
+</script>
+
+<style>
+:root {
+  --bg:#0f1117; --surface:#1a1d27; --surface2:#22263a;
+  --border:rgba(255,255,255,0.08); --border2:rgba(255,255,255,0.15);
+  --accent:#4f8ef7; --accent2:#6ee7b7; --accent3:#f59e0b;
+  --text:#f0f2f8; --text2:#8b92a8; --text3:#555d75;
+  --success:#34d399; --radius:12px; --radius-sm:8px;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'Pretendard',-apple-system,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;}
+
+/* ── setup banner ── */
+.setup-banner{
+  background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.3);
+  border-radius:var(--radius);padding:20px 24px;margin:24px auto;max-width:700px;
+}
+.setup-banner h2{font-size:16px;font-weight:700;color:var(--accent3);margin-bottom:10px;}
+.setup-step{font-size:13px;color:var(--text2);line-height:1.9;padding-left:4px;}
+.setup-step code{background:var(--surface2);padding:2px 6px;border-radius:4px;font-family:monospace;color:var(--accent2);font-size:12px;}
+.setup-step strong{color:var(--text);}
+
+/* ── nav ── */
+.nav{position:sticky;top:0;z-index:100;background:rgba(15,17,23,0.95);backdrop-filter:blur(12px);
+  border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 16px;height:56px;gap:2px;}
+.nav-logo{font-size:13px;font-weight:700;color:var(--accent);margin-right:16px;white-space:nowrap;}
+.nav-btn{padding:6px 11px;border-radius:6px;font-size:12px;font-weight:500;cursor:pointer;border:none;
+  background:transparent;color:var(--text2);transition:all 0.15s;white-space:nowrap;position:relative;}
+.nav-btn:hover{background:var(--surface2);color:var(--text);}
+.nav-btn.active{background:var(--accent);color:white;}
+.nav-cnt{position:absolute;top:2px;right:2px;background:var(--accent3);color:#000;
+  border-radius:10px;font-size:9px;font-weight:700;padding:0 4px;min-width:14px;text-align:center;line-height:14px;}
+.nav-spacer{flex:1;}
+.live-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--success);margin-right:5px;animation:pulse 2s infinite;}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}}
+.nav-status{font-size:11px;color:var(--text3);}
+
+/* ── screens ── */
+.screen{display:none;min-height:calc(100vh - 56px);}
+.screen.active{display:block;}
+
+/* ── form ── */
+.form-wrap{max-width:640px;margin:0 auto;padding:28px 20px 60px;}
+.form-header{margin-bottom:24px;}
+.form-header h1{font-size:22px;font-weight:700;margin-bottom:6px;}
+.form-header p{font-size:14px;color:var(--text2);line-height:1.6;}
+.timer-bar{display:flex;align-items:center;gap:10px;margin-top:12px;padding:10px 14px;
+  background:var(--surface);border-radius:var(--radius-sm);border:1px solid var(--border);}
+.timer-count{font-size:15px;font-weight:600;color:var(--accent3);margin-left:auto;font-variant-numeric:tabular-nums;}
+.step-label{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:600;
+  color:var(--text3);text-transform:uppercase;letter-spacing:.08em;margin:18px 0 5px;}
+.step-num{width:18px;height:18px;border-radius:50%;background:var(--accent);
+  display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:white;}
+.field-hint{font-size:12px;color:var(--text3);margin-bottom:7px;}
+.char-count{font-size:11px;color:var(--text3);text-align:right;margin-top:3px;}
+input[type=text],textarea,select{width:100%;padding:10px 13px;background:var(--surface);
+  border:1px solid var(--border2);border-radius:var(--radius-sm);color:var(--text);
+  font-size:14px;font-family:inherit;transition:border-color .15s;resize:none;}
+input:focus,textarea:focus,select:focus{outline:none;border-color:var(--accent);}
+input::placeholder,textarea::placeholder{color:var(--text3);}
+select option{background:var(--surface2);}
+.info-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;}
+.tag-select{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;}
+.tag{padding:5px 11px;border-radius:20px;font-size:12px;font-weight:500;
+  border:1px solid var(--border2);color:var(--text2);cursor:pointer;transition:all .15s;background:var(--surface);}
+.tag:hover{border-color:var(--accent);color:var(--accent);}
+.tag.selected{background:var(--accent);border-color:var(--accent);color:white;}
+.submit-btn{width:100%;padding:13px;background:var(--accent);border:none;border-radius:var(--radius-sm);
+  color:white;font-size:15px;font-weight:600;font-family:inherit;cursor:pointer;margin-top:20px;transition:all .15s;}
+.submit-btn:hover{background:#3b7de8;}
+.submit-btn:disabled{background:var(--text3);cursor:not-allowed;}
+.success-card{text-align:center;padding:40px 20px;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);}
+.success-icon{font-size:48px;margin-bottom:14px;}
+.success-card h2{font-size:20px;font-weight:700;margin-bottom:8px;}
+.success-card p{font-size:14px;color:var(--text2);}
+.add-more-btn{margin-top:18px;padding:9px 22px;background:transparent;border:1px solid var(--border2);
+  border-radius:var(--radius-sm);color:var(--text2);font-size:14px;font-family:inherit;cursor:pointer;transition:all .15s;}
+.add-more-btn:hover{border-color:var(--accent);color:var(--accent);}
+
+/* ── group view ── */
+.group-wrap{padding:24px 20px;max-width:960px;margin:0 auto;}
+.group-selector{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:20px;}
+.group-btn{padding:7px 15px;border-radius:20px;font-size:13px;font-weight:500;
+  border:1px solid var(--border2);background:var(--surface);color:var(--text2);cursor:pointer;transition:all .15s;}
+.group-btn:hover{border-color:var(--accent);color:var(--accent);}
+.group-btn.active{background:var(--accent);border-color:var(--accent);color:white;}
+.group-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:18px;}
+.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:13px;}
+.stat-card .num{font-size:26px;font-weight:700;color:var(--accent);}
+.stat-card .lbl{font-size:12px;color:var(--text2);margin-top:2px;}
+.idea-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:18px;margin-bottom:12px;transition:border-color .15s;}
+.idea-card:hover{border-color:var(--border2);}
+.idea-card-top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px;}
+.idea-title{font-size:16px;font-weight:600;}
+.idea-meta{display:flex;gap:6px;flex-wrap:wrap;}
+.badge{padding:3px 9px;border-radius:20px;font-size:11px;font-weight:500;}
+.badge-group{background:rgba(79,142,247,.15);color:var(--accent);}
+.badge-target{background:rgba(110,231,183,.15);color:var(--accent2);}
+.badge-name{background:rgba(255,255,255,.06);color:var(--text2);}
+.idea-fields{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.idea-field-label{font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;}
+.idea-field-value{font-size:13px;color:var(--text2);line-height:1.55;}
+.idea-field.full{grid-column:1/-1;}
+.score-display{margin-top:13px;padding-top:13px;border-top:1px solid var(--border);display:flex;align-items:center;gap:12px;}
+.score-total{font-size:22px;font-weight:700;color:var(--accent3);}
+.score-label{font-size:12px;color:var(--text3);}
+.score-breakdown{display:flex;gap:8px;margin-left:auto;flex-wrap:wrap;}
+.score-item{font-size:11px;color:var(--text2);}
+.score-item span{color:var(--text);font-weight:600;}
+
+/* ── eval ── */
+.eval-wrap{max-width:720px;margin:0 auto;padding:24px 20px 60px;}
+.eval-info-box{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:18px;}
+.eval-info-box label{font-size:11px;color:var(--text3);display:block;margin-bottom:6px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;}
+.eval-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:14px;}
+.eval-card-title{font-size:15px;font-weight:600;margin-bottom:4px;}
+.eval-card-sub{font-size:12px;color:var(--text2);margin-bottom:14px;}
+.criteria-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+.criteria-item label{font-size:12px;font-weight:600;color:var(--text2);display:block;margin-bottom:5px;}
+.criteria-item .hint{font-size:11px;color:var(--text3);margin-bottom:6px;}
+.score-input-row{display:flex;gap:4px;}
+.score-btn{flex:1;padding:8px 2px;border-radius:6px;font-size:13px;font-weight:600;
+  border:1px solid var(--border);background:var(--surface2);color:var(--text2);cursor:pointer;transition:all .12s;text-align:center;}
+.score-btn:hover{border-color:var(--accent);color:var(--accent);}
+.score-btn.sel{background:var(--accent);border-color:var(--accent);color:white;}
+.eval-total-row{margin-top:13px;padding:11px 13px;background:rgba(79,142,247,.08);border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:space-between;}
+.eval-total-num{font-size:24px;font-weight:700;color:var(--accent);}
+.eval-total-label{font-size:13px;color:var(--text2);}
+.eval-total-grade{font-size:13px;font-weight:600;}
+.eval-submit-btn{width:100%;padding:11px;background:var(--accent2);border:none;border-radius:var(--radius-sm);
+  color:#0a1f17;font-size:14px;font-weight:700;font-family:inherit;cursor:pointer;margin-top:18px;transition:all .15s;}
+.eval-submit-btn:hover{opacity:.9;}
+.eval-submit-btn:disabled{background:var(--text3);color:var(--text2);cursor:not-allowed;}
+
+/* ── dashboard ── */
+.dash-wrap{padding:24px 20px;max-width:1100px;margin:0 auto;}
+.dash-title{font-size:20px;font-weight:700;margin-bottom:18px;}
+.dash-top{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:22px;}
+.cluster-run-box{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;
+  background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px 20px;margin-bottom:20px;}
+.cluster-run-info strong{color:var(--text);font-size:14px;display:block;margin-bottom:3px;}
+.cluster-run-info{font-size:13px;color:var(--text2);}
+.cluster-run-btn{display:flex;align-items:center;gap:6px;padding:10px 18px;
+  background:rgba(79,142,247,.15);border:1px solid rgba(79,142,247,.4);
+  border-radius:var(--radius-sm);color:var(--accent);font-size:13px;font-weight:700;font-family:inherit;cursor:pointer;white-space:nowrap;}
+.cluster-run-btn:hover{background:rgba(79,142,247,.25);}
+.cluster-run-btn:disabled{opacity:.5;cursor:not-allowed;}
+.cluster-result-block{margin-bottom:14px;}
+.cluster-group-header{display:flex;align-items:center;gap:10px;padding:10px 14px;
+  border-radius:var(--radius-sm) var(--radius-sm) 0 0;border:1px solid var(--border);border-bottom:none;}
+.cluster-group-name{font-size:14px;font-weight:700;}
+.cluster-group-desc{font-size:12px;opacity:.65;}
+.cluster-group-cnt{margin-left:auto;font-size:12px;opacity:.5;}
+.cluster-group-ideas{border:1px solid var(--border);border-radius:0 0 var(--radius-sm) var(--radius-sm);overflow:hidden;}
+.cluster-dot{width:8px;height:8px;border-radius:50%;}
+.cluster-idea-row{display:flex;align-items:center;gap:12px;padding:9px 14px;
+  border-bottom:1px solid var(--border);font-size:13px;}
+.cluster-idea-row:last-child{border-bottom:none;}
+.cluster-idea-row:hover{background:var(--surface2);}
+.ci-title{flex:1;font-weight:500;}
+.ci-meta{font-size:11px;color:var(--text3);}
+.ci-score{font-size:12px;font-weight:700;color:var(--accent3);}
+.rank-table{width:100%;border-collapse:collapse;margin-top:8px;}
+.rank-table th{font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;
+  padding:8px 12px;text-align:left;border-bottom:1px solid var(--border);}
+.rank-table td{padding:10px 12px;font-size:13px;border-bottom:1px solid var(--border);vertical-align:middle;}
+.rank-table tr:last-child td{border-bottom:none;}
+.rank-table tr:hover td{background:var(--surface2);}
+.rank-num{font-size:11px;font-weight:700;color:var(--text3);}
+.rank-num.top3{color:var(--accent3);}
+.section-hd{font-size:16px;font-weight:600;margin-bottom:12px;}
+.divider{height:1px;background:var(--border);margin:20px 0;}
+.empty-msg{text-align:center;padding:40px 20px;color:var(--text3);font-size:14px;line-height:1.7;}
+
+/* ── present ── */
+.present-wrap{padding:24px 20px 60px;max-width:900px;margin:0 auto;}
+.slide{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:26px;margin-bottom:14px;}
+.slide-num{font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:7px;}
+.slide-title{font-size:20px;font-weight:700;margin-bottom:18px;padding-bottom:12px;border-bottom:1px solid var(--border);}
+.biz-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+.biz-field.full{grid-column:1/-1;}
+.biz-field label{font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;display:block;margin-bottom:6px;}
+.biz-field textarea,.biz-field input{width:100%;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);
+  border-radius:var(--radius-sm);color:var(--text);font-size:13px;font-family:inherit;resize:none;transition:border-color .15s;}
+.biz-field textarea:focus,.biz-field input:focus{outline:none;border-color:var(--accent);}
+.ai-btn{display:flex;align-items:center;gap:6px;padding:9px 16px;
+  background:rgba(79,142,247,.12);border:1px solid rgba(79,142,247,.3);
+  border-radius:var(--radius-sm);color:var(--accent);font-size:13px;font-weight:600;font-family:inherit;cursor:pointer;margin-top:10px;}
+.ai-btn:hover{background:rgba(79,142,247,.2);}
+.ai-output{margin-top:10px;padding:14px;background:rgba(110,231,183,.05);border:1px solid rgba(110,231,183,.15);
+  border-radius:var(--radius-sm);font-size:13px;color:var(--text2);line-height:1.7;white-space:pre-wrap;}
+.generate-all-btn{width:100%;padding:13px;background:linear-gradient(135deg,var(--accent),#7b5ea7);
+  border:none;border-radius:var(--radius-sm);color:white;font-size:15px;font-weight:700;font-family:inherit;cursor:pointer;margin-top:6px;}
+.generate-all-btn:hover{opacity:.9;}
+
+.spinner{display:inline-block;width:12px;height:12px;border:2px solid rgba(255,255,255,.3);border-top-color:white;border-radius:50%;animation:spin .6s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ── admin bar ── */
+.admin-bar{
+  position:fixed;bottom:0;left:0;right:0;z-index:200;
+  background:rgba(15,17,23,0.96);border-top:1px solid var(--border);
+  display:flex;align-items:center;gap:8px;padding:8px 16px;
+}
+.admin-badge{font-size:11px;font-weight:700;background:var(--accent3);color:#000;padding:2px 7px;border-radius:4px;}
+.admin-label{font-size:12px;color:var(--text3);}
+.admin-spacer{flex:1;}
+.admin-btn{padding:6px 12px;font-size:12px;font-weight:600;font-family:inherit;
+  border-radius:var(--radius-sm);cursor:pointer;border:1px solid var(--border2);background:var(--surface);color:var(--text2);}
+.admin-btn:hover{background:var(--surface2);}
+.admin-btn.danger{border-color:rgba(248,113,113,.4);color:#f87171;}
+</style>
+</head>
+<body>
+
+<!-- ══ 설정 안내 배너 (Firebase 설정 전에만 표시) ══ -->
+<div class="setup-banner" id="setup-banner">
+  <h2>⚙️ Firebase 설정이 필요합니다 — 처음 1회만</h2>
+  <div class="setup-step">
+    <strong>1단계.</strong> <a href="https://console.firebase.google.com" target="_blank" style="color:var(--accent)">console.firebase.google.com</a> 접속 → 새 프로젝트 생성 (무료 Spark 플랜)<br>
+    <strong>2단계.</strong> 프로젝트 → <code>빌드 → Realtime Database</code> → 데이터베이스 만들기 → <strong>테스트 모드</strong> 선택<br>
+    <strong>3단계.</strong> 프로젝트 설정(⚙️) → <code>내 앱 → 웹앱 추가(&lt;/&gt;)</code> → firebaseConfig 복사<br>
+    <strong>4단계.</strong> 이 HTML 파일 상단 <code>firebaseConfig</code> 부분에 붙여넣기 후 저장<br>
+    <strong>5단계.</strong> HTML 파일을 웹서버에 올리거나 <a href="https://firebase.google.com/docs/hosting" target="_blank" style="color:var(--accent)">Firebase Hosting</a>으로 배포<br>
+    <br>
+    <strong>토큰 비용:</strong> AI 기능(클러스터링·발표문)은 <strong>운영자만</strong> 사용합니다. 참가자 40명은 AI 호출 없음.<br>
+    클러스터링 1회 ≈ 약 2,000~3,000 토큰 / 발표문 1건 ≈ 약 1,500 토큰 → <strong>총 워크샵 비용 $0.1 미만</strong>
+  </div>
+</div>
+
+<nav class="nav">
+  <span class="nav-logo">💡 IDEATION WS</span>
+  <button class="nav-btn active" onclick="go('form')">① 아이디어 입력</button>
+  <button class="nav-btn" onclick="go('group')">② 조별 보기</button>
+  <button class="nav-btn" onclick="go('eval')">
+    ③ 평가
+  </button>
+  <button class="nav-btn" onclick="go('dash')">
+    ④ 통합 현황 <span class="nav-cnt" id="nav-cnt-ideas"></span>
+  </button>
+  <button class="nav-btn" onclick="go('present')">⑤ 발표 자료</button>
+  <span class="nav-spacer"></span>
+  <span class="nav-status"><span class="live-dot"></span>Firebase 실시간</span>
+</nav>
+
+<!-- ① 아이디어 입력 -->
+<div class="screen active" id="screen-form">
+  <div class="form-wrap">
+    <div class="form-header">
+      <h1>아이디어를 작성해주세요</h1>
+      <p>고객 문제를 해결하는 아이디어를 항목에 맞게 간결하게 작성하세요.</p>
+      <div class="timer-bar">
+        <span style="font-size:16px">⏱</span>
+        <span style="font-size:13px;color:var(--text2)">권장 작성 시간</span>
+        <span class="timer-count" id="timer">05:00</span>
+      </div>
+    </div>
+    <div id="form-body">
+      <div class="info-row">
+        <div>
+          <div class="step-label"><span class="step-num">-</span>이름</div>
+          <input type="text" id="f-name" placeholder="홍길동" maxlength="10">
+        </div>
+        <div>
+          <div class="step-label"><span class="step-num">-</span>조</div>
+          <select id="f-group">
+            <option value="">조를 선택하세요</option>
+            <option>1조</option><option>2조</option><option>3조</option><option>4조</option>
+            <option>5조</option><option>6조</option><option>7조</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="step-label"><span class="step-num">1</span>아이디어 제목</div>
+      <div class="field-hint">한 문장으로 아이디어를 표현해주세요</div>
+      <input type="text" id="f-title" placeholder="예) 앱 내 실시간 CS 채팅 기능 도입" maxlength="60"
+        oninput="document.getElementById('tc').textContent=this.value.length">
+      <div class="char-count"><span id="tc">0</span>/60</div>
+
+      <div class="step-label"><span class="step-num">2</span>타겟 고객</div>
+      <div class="field-hint">해결하려는 대상 고객을 선택하세요</div>
+      <div class="tag-select">
+        <span class="tag" onclick="pickTag(this,'target')">신규 가입 고객</span>
+        <span class="tag" onclick="pickTag(this,'target')">재구매 고객</span>
+        <span class="tag" onclick="pickTag(this,'target')">이탈 위험 고객</span>
+        <span class="tag" onclick="pickTag(this,'target')">VIP 고객</span>
+        <span class="tag" onclick="pickTag(this,'target')">불만 고객</span>
+        <span class="tag" onclick="pickTag(this,'target')">전체 고객</span>
+      </div>
+      <input type="text" id="f-target" placeholder="직접 입력 (선택 사항)" style="margin-top:8px">
+
+      <div class="step-label"><span class="step-num">3</span>고객이 겪는 문제</div>
+      <div class="field-hint">어떤 불편함 / 불만을 해결하려 하나요?</div>
+      <textarea id="f-problem" rows="3" maxlength="200" placeholder="예) 문의 후 답변까지 평균 2일 소요, 고객이 중간에 이탈하는 문제가 발생함"
+        oninput="document.getElementById('pc').textContent=this.value.length"></textarea>
+      <div class="char-count"><span id="pc">0</span>/200</div>
+
+      <div class="step-label"><span class="step-num">4</span>해결 방법</div>
+      <div class="field-hint">구체적으로 어떻게 해결할지 설명해주세요</div>
+      <textarea id="f-solution" rows="3" maxlength="200" placeholder="예) 앱 내 채팅 모듈 추가, AI 자동 분류 후 담당자 배정, 30분 내 첫 응답 보장"
+        oninput="document.getElementById('sc').textContent=this.value.length"></textarea>
+      <div class="char-count"><span id="sc">0</span>/200</div>
+
+      <div class="step-label"><span class="step-num">5</span>우리 회사가 해야 하는 이유</div>
+      <div class="field-hint">경쟁 우위 / 당위성 / 전략적 이유</div>
+      <div class="tag-select">
+        <span class="tag" onclick="pickTag(this,'reason')">고객 이탈 방지</span>
+        <span class="tag" onclick="pickTag(this,'reason')">차별화 경쟁력</span>
+        <span class="tag" onclick="pickTag(this,'reason')">기존 자산 활용</span>
+        <span class="tag" onclick="pickTag(this,'reason')">수익 증대</span>
+        <span class="tag" onclick="pickTag(this,'reason')">시장 선점</span>
+        <span class="tag" onclick="pickTag(this,'reason')">규제/컴플라이언스</span>
+      </div>
+      <textarea id="f-reason" rows="2" maxlength="150" placeholder="추가 설명 (선택 사항)" style="margin-top:8px"></textarea>
+
+      <button class="submit-btn" id="submit-btn" onclick="submitIdea()">아이디어 제출하기 →</button>
+    </div>
+    <div id="success-view" style="display:none">
+      <div class="success-card">
+        <div class="success-icon">✅</div>
+        <h2>아이디어가 제출되었습니다!</h2>
+        <p>조원들의 아이디어와 함께 실시간으로 취합 중입니다.<br>퍼실리테이터의 안내를 기다려주세요.</p>
+        <button class="add-more-btn" onclick="resetForm()">+ 아이디어 추가 제출</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ② 조별 보기 -->
+<div class="screen" id="screen-group">
+  <div class="group-wrap">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px;flex-wrap:wrap">
+      <span class="section-hd" style="margin:0">조별 아이디어</span>
+      <div class="group-selector" id="group-selector"></div>
+    </div>
+    <div class="group-stats" id="group-stats"></div>
+    <div id="group-ideas"></div>
+  </div>
+</div>
+
+<!-- ③ 평가 -->
+<div class="screen" id="screen-eval">
+  <div class="eval-wrap">
+    <div class="form-header">
+      <h1>아이디어 평가</h1>
+      <p>내 조를 선택하면 <strong>우리 조의 아이디어만</strong> 표시됩니다. 기준별 1~5점 선택 후 제출하세요.</p>
+    </div>
+    <div class="eval-info-box">
+      <label>평가자 정보</label>
+      <div class="info-row" style="margin:0 0 8px">
+        <input type="text" id="e-name" placeholder="이름">
+        <select id="e-group" onchange="renderEval()">
+          <option value="">내 조를 선택하세요</option>
+          <option>1조</option><option>2조</option><option>3조</option><option>4조</option>
+          <option>5조</option><option>6조</option><option>7조</option>
+        </select>
+      </div>
+      <div id="eval-group-notice" style="font-size:12px;color:var(--accent2);display:none">✓ 우리 조 아이디어만 표시됩니다</div>
+    </div>
+    <div id="eval-cards"></div>
+  </div>
+</div>
+
+<!-- ④ 통합 현황 -->
+<div class="screen" id="screen-dash">
+  <div class="dash-wrap">
+    <div class="dash-title">📊 전체 현황 대시보드</div>
+    <div class="dash-top" id="dash-stats"></div>
+    <div class="cluster-run-box">
+      <div class="cluster-run-info">
+        <strong>✦ AI 아이디어 클러스터링 (운영자 전용)</strong>
+        전체 아이디어를 유사 주제끼리 자동 분류합니다. 아이디어 수집 완료 후 실행하세요.
+      </div>
+      <button class="cluster-run-btn" id="cluster-run-btn" onclick="runClustering()">✦ 클러스터링 실행</button>
+    </div>
+    <div id="dash-clusters"></div>
+    <div class="divider"></div>
+    <div class="section-hd">점수 순위</div>
+    <div id="dash-ranking"></div>
+  </div>
+</div>
+
+<!-- ⑤ 발표 자료 -->
+<div class="screen" id="screen-present">
+  <div class="present-wrap">
+    <div class="form-header">
+      <h1>발표 자료 작성</h1>
+      <p>아이디어를 선택하면 사업화 검토 템플릿이 열립니다. 조별 토의 내용을 입력하고 AI 보완을 받으세요.</p>
+    </div>
+    <div class="eval-info-box">
+      <label>발표할 아이디어 선택</label>
+      <select id="present-selector" onchange="loadPresent()">
+        <option value="">아이디어를 선택하세요</option>
+      </select>
+    </div>
+    <div id="present-content" style="display:none">
+      <div class="slide">
+        <div class="slide-num">Slide 01</div>
+        <div class="slide-title" id="ps-title">아이디어명</div>
+        <div class="biz-grid">
+          <div class="biz-field full"><label>💡 핵심 아이디어 요약</label>
+            <textarea id="ps-summary" rows="2" placeholder="한 문단으로 이 아이디어의 핵심을 정리"></textarea></div>
+          <div class="biz-field"><label>🎯 타겟 고객</label>
+            <input type="text" id="ps-target"></div>
+          <div class="biz-field"><label>🔥 해결하는 고객 문제</label>
+            <textarea id="ps-problem" rows="2"></textarea></div>
+        </div>
+      </div>
+      <div class="slide">
+        <div class="slide-num">Slide 02</div>
+        <div class="slide-title">사업화 검토</div>
+        <div class="biz-grid">
+          <div class="biz-field"><label>📈 기대 효과 / KPI</label>
+            <textarea id="ps-effect" rows="3" placeholder="측정 가능한 지표 중심으로"></textarea></div>
+          <div class="biz-field"><label>⚡ 실행 난이도 & 기간</label>
+            <textarea id="ps-effort" rows="3" placeholder="예) 개발 3개월, 외부 API 연동 필요"></textarea></div>
+          <div class="biz-field"><label>💰 필요 투자 / 비용</label>
+            <textarea id="ps-cost" rows="2" placeholder="대략적인 규모만도 OK"></textarea></div>
+          <div class="biz-field"><label>⚠️ 주요 리스크</label>
+            <textarea id="ps-risk" rows="2" placeholder="해결 방안도 함께"></textarea></div>
+          <div class="biz-field full"><label>🏢 제안 실행 조직</label>
+            <textarea id="ps-org" rows="2" placeholder="구체적인 부서명으로"></textarea></div>
+        </div>
+      </div>
+      <div class="slide">
+        <div class="slide-num">Slide 03</div>
+        <div class="slide-title">왜 지금, 우리 회사가?</div>
+        <div class="biz-grid">
+          <div class="biz-field"><label>🚀 전략적 당위성</label>
+            <textarea id="ps-why" rows="3" placeholder="데이터나 근거를 포함하면 좋음"></textarea></div>
+          <div class="biz-field"><label>🌐 시장 / 경쟁 환경</label>
+            <textarea id="ps-market" rows="3" placeholder="업계 트렌드 및 경쟁사 동향"></textarea></div>
+          <div class="biz-field full"><label>✅ 성공을 위한 핵심 조건</label>
+            <textarea id="ps-condition" rows="2" placeholder="예) 부사장급 스폰서십, 전담 TF 구성, 6개월 내 MVP"></textarea></div>
+        </div>
+      </div>
+      <div class="slide">
+        <div class="slide-num">Slide 04 — AI 보완 (운영자 전용)</div>
+        <div class="slide-title">발표 메시지 자동 생성</div>
+        <p style="font-size:13px;color:var(--text2);margin-bottom:10px">위 내용을 바탕으로 AI가 빈 항목을 채우고 3분 발표 멘트를 작성합니다.</p>
+        <button class="generate-all-btn" onclick="generateAll()">✦ AI로 전체 내용 보완하기</button>
+        <div id="ai-msg-output" class="ai-output" style="display:none;margin-top:12px"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 운영자 하단바 -->
+<div class="admin-bar">
+  <span class="admin-badge">운영자</span>
+  <span class="admin-label">클러스터링·발표문 AI 기능은 운영자만 사용 / 참가자는 입력·평가·결과 조회만</span>
+  <span class="admin-spacer"></span>
+  <button class="admin-btn" onclick="go('dash');renderDash()">대시보드 새로고침</button>
+  <button class="admin-btn danger" onclick="clearAllData()">데이터 전체 삭제</button>
+</div>
+
+<script>
+// ─── TAG ───
+window._tagVals = { target: null, reason: null };
+window.pickTag = function(el, group) {
+  el.closest('.tag-select').querySelectorAll('.tag').forEach(t=>t.classList.remove('selected'));
+  el.classList.add('selected');
+  window._tagVals[group] = el.textContent;
+  if(group==='target') document.getElementById('f-target').value = el.textContent;
+};
+
+// ─── NAV ───
+window.go = function(screen) {
+  document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
+  const order=['form','group','eval','dash','present'];
+  document.querySelectorAll('.nav-btn').forEach((b,i)=>{ if(order[i]===screen) b.classList.add('active'); });
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  document.getElementById('screen-'+screen).classList.add('active');
+  if(screen==='group')   window.renderGroup?.();
+  if(screen==='eval')    window.renderEval?.();
+  if(screen==='dash')    window.renderDash?.();
+  if(screen==='present') window.renderPresentSelector?.();
+};
+
+// ─── TIMER ───
+let timerSec=300, timerInt;
+function startTimer(){
+  clearInterval(timerInt);
+  timerInt=setInterval(()=>{
+    timerSec=Math.max(0,timerSec-1);
+    const m=String(Math.floor(timerSec/60)).padStart(2,'0'), s=String(timerSec%60).padStart(2,'0');
+    document.getElementById('timer').textContent=m+':'+s;
+    if(timerSec===0) clearInterval(timerInt);
+  },1000);
+}
+startTimer();
+
+// Firebase 설정 완료 여부 체크 (설정 전이면 배너 유지)
+setTimeout(()=>{
+  const banner=document.getElementById('setup-banner');
+  if(banner){
+    // 실제 Firebase 연결 후에는 배너 숨김
+    try{
+      if(window.firebaseConnected) banner.style.display='none';
+    }catch(e){}
+  }
+},2000);
+</script>
+</body>
+</html>
