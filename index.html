@@ -35,6 +35,21 @@ let ideas    = {};   // { firebaseKey: ideaObj }
 let evals    = {};   // { firebaseKey: evalObj }
 let clusters = null;
 
+// ─── 샘플 데이터 (Firebase에 저장 안 됨, 로컬 표시용) ───
+const SAMPLE_IDEAS = [
+  { key:'sample-1', name:'홍길동', group:'1조', title:'앱 내 실시간 CS 채팅 기능', target:'불만 고객', problem:'문의 후 평균 2일 소요, 이메일·전화 채널 혼재로 히스토리 관리 불가', solution:'앱 내 채팅 모듈 추가, AI 자동 분류, 30분 내 첫 응답 보장', reason:'고객 이탈 방지 — CS 불만이 이탈 원인 1위, 경쟁사 대비 대응속도 2배 느림', isSample:true },
+  { key:'sample-2', name:'이서연', group:'2조', title:'AI 기반 FAQ 자동 답변 챗봇', target:'전체 고객', problem:'단순 반복 문의가 전체 CS의 60%, 야간·주말 응답 공백 발생', solution:'LLM 기반 챗봇 도입, 복잡 문의는 담당자 에스컬레이션 자동화', reason:'수익 증대 — CS 인력 30% 효율화, 24시간 응대 가능', isSample:true },
+  { key:'sample-3', name:'박도윤', group:'3조', title:'배송 지연 자동 보상 쿠폰', target:'재구매 고객', problem:'배송 지연 시 고객이 직접 문의해야 보상 받을 수 있어 불만 가중', solution:'지연 감지 시 자동으로 쿠폰 발행 및 푸시 알림 발송', reason:'고객 이탈 방지 — 선제적 보상으로 부정 리뷰 40% 감소 기대', isSample:true },
+  { key:'sample-4', name:'최지우', group:'4조', title:'구매이력 기반 재구매 예측 알림', target:'VIP 고객', problem:'재구매 주기가 지난 고객에 대한 능동적 접촉이 없어 이탈 발생', solution:'ML로 재구매 예측 후 최적 타이밍에 개인화 메시지 발송', reason:'시장 선점 — 리텐션 마케팅 자동화로 LTV 20%p 향상', isSample:true },
+  { key:'sample-5', name:'정하은', group:'5조', title:'VIP 고객 전담 매니저 배정', target:'VIP 고객', problem:'상위 10% 고객이 70% 매출 기여하나 동일한 CS 경험을 받음', solution:'연간 구매액 기준 VIP 선정, 전담 매니저 1:1 배정 및 전용 채널 운영', reason:'차별화 경쟁력 — 프리미엄 경험으로 VIP 이탈률 50% 감소', isSample:true },
+];
+
+function getAllIdeas() {
+  const real = Object.entries(ideas).map(([k,v])=>({key:k,...v}));
+  if(real.length > 0) return real;
+  return SAMPLE_IDEAS; // 실제 데이터 없을 때만 샘플 표시
+}
+
 // ─── DB 실시간 리스닝 ───
 onValue(ref(db, 'ideas'),    snap => { ideas    = snap.val() || {}; refreshAll(); });
 onValue(ref(db, 'evals'),    snap => { evals    = snap.val() || {}; refreshAll(); });
@@ -45,9 +60,8 @@ function refreshAll() {
   if(!active) return;
   const id = active.id;
   if(id==='screen-form')    { /* 입력화면은 자동갱신 없음 */ }
-  if(id==='screen-group')   renderGroup();
+  if(id==='screen-view')    renderView();
   if(id==='screen-eval')    renderEval();
-  if(id==='screen-dash')    renderDash();
   if(id==='screen-present') renderPresentSelector();
   updateNavCounts();
 }
@@ -215,21 +229,26 @@ window.generateAll = async function() {
 // ─── 렌더 함수들 ───
 
 const COLORS = ['#4f8ef7','#6ee7b7','#f59e0b','#f87171','#a78bfa','#fb923c','#67e8f9'];
+window.COLORS = COLORS;
 const CRITERIA = [
   { key:'c1', label:'고객 임팩트',  hint:'고객에게 얼마나 중요한 문제인가?' },
   { key:'c2', label:'구현 가능성', hint:'현재 역량으로 실행 가능한가?' },
   { key:'c3', label:'사업 성장성', hint:'매출/고객 확보에 기여 가능한가?' },
   { key:'c4', label:'실행 속도',   hint:'6개월 내 시장에 낼 수 있는가?' },
 ];
+window.CRITERIA = CRITERIA;
 
 function getIdeaArr()  { return Object.entries(ideas).map(([k,v])=>({key:k,...v})); }
+window.getIdeaArr = getIdeaArr;
 function getEvalArr()  { return Object.values(evals); }
+window.getEvalArr = getEvalArr;
 
-function getAvgScore(ideaKey) {
+window.getAvgScore = function(ideaKey) {
   const sc = getEvalArr().filter(e=>e.ideaKey===ideaKey).map(e=>e.total);
   return sc.length ? sc.reduce((a,b)=>a+b,0)/sc.length : null;
-}
-function getGrade(avg) {
+}function getAvgScore(k) { return window.getAvgScore(k); }
+
+window.getGrade = function getGrade(avg) {
   if(avg===null) return '';
   if(avg>=17) return '⭐ 최우선 추진';
   if(avg>=13) return '✅ 추진 권장';
@@ -237,38 +256,61 @@ function getGrade(avg) {
   return '⏸ 보류';
 }
 
-// ── 조별 보기 ──
-window.renderGroup = function() {
-  const arr = getIdeaArr();
-  const selEl = document.getElementById('group-selector');
-  const current = selEl.dataset.current || '1조';
-  const groups = ['1조','2조','3조','4조','5조','6조','7조'];
-  selEl.innerHTML = groups.map(g=>`<button class="group-btn${g===current?' active':''}" onclick="selectGroup('${g}')">${g}</button>`).join('');
-  selEl.dataset.current = current;
+// ── 통합 뷰 ──
+let currentViewTab = 'all';
 
-  const filtered = arr.filter(i=>i.group===current);
+window.switchViewTab = function(tab) {
+  currentViewTab = tab;
+  document.querySelectorAll('.view-tab').forEach((t,i)=>{
+    const tabs=['all','1조','2조','3조','4조','5조','6조','7조'];
+    t.classList.toggle('active', tabs[i]===tab);
+  });
+  if(tab==='all') {
+    document.getElementById('view-all-panel').style.display='block';
+    document.getElementById('view-group-panel').style.display='none';
+    renderDashPanel();
+  } else {
+    document.getElementById('view-all-panel').style.display='none';
+    document.getElementById('view-group-panel').style.display='block';
+    renderGroupPanel(tab);
+  }
+};
+
+window.renderView = function() {
+  if(currentViewTab==='all') {
+    document.getElementById('view-all-panel').style.display='block';
+    document.getElementById('view-group-panel').style.display='none';
+    renderDashPanel();
+  } else {
+    document.getElementById('view-all-panel').style.display='none';
+    document.getElementById('view-group-panel').style.display='block';
+    renderGroupPanel(currentViewTab);
+  }
+};
+
+function renderGroupPanel(group) {
+  const arr = getAllIdeas().filter(i=>i.group===group);
   const statEl = document.getElementById('group-stats');
   const evalArr = getEvalArr();
-  const evalCnt = evalArr.filter(e=>filtered.some(i=>i.key===e.ideaKey)).length;
-  const avgAll = filtered.length ? (() => {
-    const avgs = filtered.map(i=>getAvgScore(i.key)).filter(v=>v!==null);
-    return avgs.length ? (avgs.reduce((a,b)=>a+b,0)/avgs.length).toFixed(1) : '-';
-  })() : '-';
+  const evalCnt = evalArr.filter(e=>arr.some(i=>i.key===e.ideaKey)).length;
+  const avgs = arr.map(i=>getAvgScore(i.key)).filter(v=>v!==null);
+  const avgAll = avgs.length ? (avgs.reduce((a,b)=>a+b,0)/avgs.length).toFixed(1) : '-';
 
   statEl.innerHTML = `
-    <div class="stat-card"><div class="num">${filtered.length}</div><div class="lbl">제출 아이디어</div></div>
+    <div class="stat-card"><div class="num">${arr.length}</div><div class="lbl">제출 아이디어</div></div>
     <div class="stat-card"><div class="num">${avgAll}</div><div class="lbl">평균 점수</div></div>
     <div class="stat-card"><div class="num">${evalCnt}</div><div class="lbl">평가 수</div></div>`;
 
   const el = document.getElementById('group-ideas');
-  if(!filtered.length) { el.innerHTML='<div class="empty-msg">이 조의 아이디어가 없습니다.</div>'; return; }
-  el.innerHTML = filtered.map(idea=>{
+  if(!arr.length) { el.innerHTML='<div class="empty-msg">이 조의 아이디어가 없습니다.</div>'; return; }
+  el.innerHTML = arr.map(idea=>{
     const avg = getAvgScore(idea.key);
     const evalEntries = getEvalArr().filter(e=>e.ideaKey===idea.key);
-    return `<div class="idea-card">
+    return `<div class="idea-card${idea.isSample?' sample-card':''}">
       <div class="idea-card-top">
         <div class="idea-title">${idea.title}</div>
         <div class="idea-meta">
+          ${idea.isSample?'<span class="badge badge-sample">샘플</span>':''}
           <span class="badge badge-group">${idea.group}</span>
           ${idea.target?`<span class="badge badge-target">${idea.target}</span>`:''}
           <span class="badge badge-name">${idea.name}</span>
@@ -291,92 +333,29 @@ window.renderGroup = function() {
       </div>`:''}
     </div>`;
   }).join('');
-};
+}
 
-window.selectGroup = function(g) {
-  document.getElementById('group-selector').dataset.current = g;
-  renderGroup();
-};
-
-// ── 평가 ──
-if(!window._evalScores) window._evalScores = {};
-
-window.renderEval = function() {
-  const el = document.getElementById('eval-cards');
-  const group = document.getElementById('e-group').value;
-  const notice = document.getElementById('eval-group-notice');
-  if(!group) {
-    el.innerHTML='<div class="empty-msg">위에서 내 조를 선택하면<br>우리 조의 아이디어가 표시됩니다.</div>';
-    if(notice) notice.style.display='none';
-    return;
-  }
-  const filtered = getIdeaArr().filter(i=>i.group===group);
-  if(notice) notice.style.display='block';
-  if(!filtered.length) { el.innerHTML=`<div class="empty-msg">${group}의 아이디어가 없습니다.<br>① 탭에서 먼저 아이디어를 제출해주세요.</div>`; return; }
-
-  el.innerHTML = filtered.map(idea=>{
-    const sc = window._evalScores[idea.key] || {};
-    const total = Object.values(sc).reduce((a,b)=>a+(b||0),0);
-    const grade = getGrade(total>=4?total:null);
-    return `<div class="eval-card">
-      <div class="eval-card-title">${idea.title}</div>
-      <div class="eval-card-sub">${idea.group} · ${idea.name}${idea.target?' · '+idea.target:''}</div>
-      <div class="criteria-grid">
-        ${CRITERIA.map(c=>`
-          <div class="criteria-item">
-            <label>${c.label}</label>
-            <div class="hint">${c.hint}</div>
-            <div class="score-input-row">
-              ${[1,2,3,4,5].map(n=>`<div class="score-btn${sc[c.key]===n?' sel':''}"
-                onclick="setEvalScore('${idea.key}','${c.key}',${n},this)">${n}</div>`).join('')}
-            </div>
-          </div>`).join('')}
-      </div>
-      <div class="eval-total-row">
-        <div>
-          <div class="eval-total-num" id="et-${idea.key}">${total||0}</div>
-          <div class="eval-total-label">/ 20점</div>
-        </div>
-        <div class="eval-total-grade" id="eg-${idea.key}">${grade}</div>
-      </div>
-      <button class="eval-submit-btn" id="eval-submit-${idea.key}" onclick="submitEval('${idea.key}')">이 아이디어 평가 제출 →</button>
-    </div>`;
-  }).join('');
-};
-
-window.setEvalScore = function(ideaKey, cKey, val, el) {
-  if(!window._evalScores[ideaKey]) window._evalScores[ideaKey]={};
-  window._evalScores[ideaKey][cKey]=val;
-  el.closest('.score-input-row').querySelectorAll('.score-btn').forEach(b=>b.classList.remove('sel'));
-  el.classList.add('sel');
-  const sc = window._evalScores[ideaKey];
-  const total = Object.values(sc).reduce((a,b)=>a+(b||0),0);
-  const tEl=document.getElementById('et-'+ideaKey); if(tEl) tEl.textContent=total;
-  const gEl=document.getElementById('eg-'+ideaKey); if(gEl) gEl.textContent=total>=4?getGrade(total):'';
-};
-
-// ── 대시보드 ──
-window.renderDash = function() {
-  const arr = getIdeaArr();
+function renderDashPanel() {
+  const arr = getAllIdeas();
   const evalArr = getEvalArr();
-  const groups = [...new Set(arr.map(i=>i.group))].length;
+  const groups = [...new Set(arr.filter(i=>!i.isSample).map(i=>i.group))].length;
   const scored = arr.filter(i=>evalArr.some(e=>e.ideaKey===i.key));
+  const realCount = arr.filter(i=>!i.isSample).length;
 
   document.getElementById('dash-stats').innerHTML = `
-    <div class="stat-card"><div class="num" style="color:var(--accent)">${arr.length}</div><div class="lbl">전체 아이디어</div></div>
+    <div class="stat-card"><div class="num" style="color:var(--accent)">${realCount}</div><div class="lbl">전체 아이디어</div></div>
     <div class="stat-card"><div class="num" style="color:var(--accent2)">${groups}</div><div class="lbl">참여 조</div></div>
     <div class="stat-card"><div class="num" style="color:var(--accent3)">${evalArr.length}</div><div class="lbl">평가 수</div></div>
     <div class="stat-card"><div class="num" style="color:#a78bfa">${scored.length}</div><div class="lbl">평가된 아이디어</div></div>`;
 
   renderClusterSection(arr, evalArr);
   renderRankingSection(arr);
-};
+}
 
 function renderClusterSection(arr, evalArr) {
   const el = document.getElementById('dash-clusters');
   if(!arr.length) { el.innerHTML='<div class="empty-msg">제출된 아이디어가 없습니다.</div>'; return; }
   if(!clusters || !Array.isArray(clusters)) {
-    // 조별 기본 표시
     const byGroup = {};
     arr.forEach(i=>{ if(!byGroup[i.group]) byGroup[i.group]=[]; byGroup[i.group].push(i); });
     el.innerHTML = '<div style="font-size:12px;color:var(--text3);margin-bottom:12px">클러스터링 전 — 조별로 표시됩니다. 위 버튼으로 AI 클러스터링을 실행하세요.</div>'
@@ -391,6 +370,7 @@ function renderClusterSection(arr, evalArr) {
             ${byGroup[g].map(idea=>{
               const avg=getAvgScore(idea.key);
               return `<div class="cluster-idea-row">
+                ${idea.isSample?'<span style="font-size:10px;background:rgba(245,158,11,0.2);color:var(--accent3);padding:1px 5px;border-radius:3px;margin-right:4px">샘플</span>':''}
                 <span class="ci-title">${idea.title}</span>
                 <span class="ci-meta">${idea.name}</span>
                 ${avg!==null?`<span class="ci-score">${avg.toFixed(1)}점</span>`:''}
@@ -414,6 +394,7 @@ function renderClusterSection(arr, evalArr) {
           ${clIdeas.map(idea=>{
             const avg=getAvgScore(idea.key);
             return `<div class="cluster-idea-row">
+              ${idea.isSample?'<span style="font-size:10px;background:rgba(245,158,11,0.2);color:var(--accent3);padding:1px 5px;border-radius:3px;margin-right:4px">샘플</span>':''}
               <span class="ci-title">${idea.title}</span>
               <span class="ci-meta">${idea.group} · ${idea.name}</span>
               ${avg!==null?`<span class="ci-score">${avg.toFixed(1)}점</span>`:''}
@@ -425,7 +406,7 @@ function renderClusterSection(arr, evalArr) {
 }
 
 function renderRankingSection(arr) {
-  const ranked = arr.map(idea=>{
+  const ranked = arr.filter(i=>!i.isSample).map(idea=>{
     const avg=getAvgScore(idea.key);
     const cnt=getEvalArr().filter(e=>e.ideaKey===idea.key).length;
     return {idea,avg,cnt};
@@ -448,7 +429,7 @@ function renderRankingSection(arr) {
 
 // ── 발표 ──
 window.renderPresentSelector = function() {
-  const arr = getIdeaArr();
+  const arr = getAllIdeas().filter(i=>!i.isSample);
   const sel = document.getElementById('present-selector');
   sel.innerHTML = '<option value="">아이디어를 선택하세요</option>'
     + arr.map(i=>`<option value="${i.key}">[${i.group}] ${i.title}</option>`).join('');
@@ -498,6 +479,16 @@ window.clearAllData = async function() {
   alert('삭제 완료');
 };
 
+// ── 전역 노출 (module → window) ──
+window.getAllIdeas  = getAllIdeas;
+window.getIdeaArr  = getIdeaArr;
+window.getEvalArr  = getEvalArr;
+window.getAvgScore = getAvgScore;
+window.getGrade    = getGrade;
+window.COLORS      = COLORS;
+window.CRITERIA    = CRITERIA;
+window.SAMPLE_IDEAS = SAMPLE_IDEAS;
+
 </script>
 
 <style>
@@ -511,15 +502,7 @@ window.clearAllData = async function() {
 *{box-sizing:border-box;margin:0;padding:0;}
 body{font-family:'Pretendard',-apple-system,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;}
 
-/* ── setup banner ── */
-.setup-banner{
-  background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.3);
-  border-radius:var(--radius);padding:20px 24px;margin:24px auto;max-width:700px;
-}
-.setup-banner h2{font-size:16px;font-weight:700;color:var(--accent3);margin-bottom:10px;}
-.setup-step{font-size:13px;color:var(--text2);line-height:1.9;padding-left:4px;}
-.setup-step code{background:var(--surface2);padding:2px 6px;border-radius:4px;font-family:monospace;color:var(--accent2);font-size:12px;}
-.setup-step strong{color:var(--text);}
+
 
 /* ── nav ── */
 .nav{position:sticky;top:0;z-index:100;background:rgba(15,17,23,0.95);backdrop-filter:blur(12px);
@@ -697,6 +680,18 @@ select option{background:var(--surface2);}
 .spinner{display:inline-block;width:12px;height:12px;border:2px solid rgba(255,255,255,.3);border-top-color:white;border-radius:50%;animation:spin .6s linear infinite;}
 @keyframes spin{to{transform:rotate(360deg)}}
 
+/* ── view tabs ── */
+.view-tabs{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:20px;padding-bottom:12px;border-bottom:1px solid var(--border);}
+.view-tab{padding:6px 14px;border-radius:20px;font-size:12px;font-weight:500;
+  border:1px solid var(--border2);background:var(--surface);color:var(--text2);cursor:pointer;transition:all .15s;}
+.view-tab:hover{border-color:var(--accent);color:var(--accent);}
+.view-tab.active{background:var(--accent);border-color:var(--accent);color:white;}
+
+/* ── sample badge ── */
+.badge-sample{background:rgba(245,158,11,0.2);color:var(--accent3);}
+.sample-card{border-color:rgba(245,158,11,0.2);}
+.sample-card:hover{border-color:rgba(245,158,11,0.4);}
+
 /* ── admin bar ── */
 .admin-bar{
   position:fixed;bottom:0;left:0;right:0;z-index:200;
@@ -714,32 +709,14 @@ select option{background:var(--surface2);}
 </head>
 <body>
 
-<!-- ══ 설정 안내 배너 (Firebase 설정 전에만 표시) ══ -->
-<div class="setup-banner" id="setup-banner">
-  <h2>⚙️ Firebase 설정이 필요합니다 — 처음 1회만</h2>
-  <div class="setup-step">
-    <strong>1단계.</strong> <a href="https://console.firebase.google.com" target="_blank" style="color:var(--accent)">console.firebase.google.com</a> 접속 → 새 프로젝트 생성 (무료 Spark 플랜)<br>
-    <strong>2단계.</strong> 프로젝트 → <code>빌드 → Realtime Database</code> → 데이터베이스 만들기 → <strong>테스트 모드</strong> 선택<br>
-    <strong>3단계.</strong> 프로젝트 설정(⚙️) → <code>내 앱 → 웹앱 추가(&lt;/&gt;)</code> → firebaseConfig 복사<br>
-    <strong>4단계.</strong> 이 HTML 파일 상단 <code>firebaseConfig</code> 부분에 붙여넣기 후 저장<br>
-    <strong>5단계.</strong> HTML 파일을 웹서버에 올리거나 <a href="https://firebase.google.com/docs/hosting" target="_blank" style="color:var(--accent)">Firebase Hosting</a>으로 배포<br>
-    <br>
-    <strong>토큰 비용:</strong> AI 기능(클러스터링·발표문)은 <strong>운영자만</strong> 사용합니다. 참가자 40명은 AI 호출 없음.<br>
-    클러스터링 1회 ≈ 약 2,000~3,000 토큰 / 발표문 1건 ≈ 약 1,500 토큰 → <strong>총 워크샵 비용 $0.1 미만</strong>
-  </div>
-</div>
+
 
 <nav class="nav">
   <span class="nav-logo">💡 IDEATION WS</span>
   <button class="nav-btn active" onclick="go('form')">① 아이디어 입력</button>
-  <button class="nav-btn" onclick="go('group')">② 조별 보기</button>
-  <button class="nav-btn" onclick="go('eval')">
-    ③ 평가
-  </button>
-  <button class="nav-btn" onclick="go('dash')">
-    ④ 통합 현황 <span class="nav-cnt" id="nav-cnt-ideas"></span>
-  </button>
-  <button class="nav-btn" onclick="go('present')">⑤ 발표 자료</button>
+  <button class="nav-btn" onclick="go('view')">② 아이디어 현황 <span class="nav-cnt" id="nav-cnt-ideas"></span></button>
+  <button class="nav-btn" onclick="go('eval')">③ 평가</button>
+  <button class="nav-btn" onclick="go('present')">④ 발표 자료</button>
   <span class="nav-spacer"></span>
   <span class="nav-status"><span class="live-dot"></span>Firebase 실시간</span>
 </nav>
@@ -951,7 +928,7 @@ select option{background:var(--surface2);}
   <span class="admin-badge">운영자</span>
   <span class="admin-label">클러스터링·발표문 AI 기능은 운영자만 사용 / 참가자는 입력·평가·결과 조회만</span>
   <span class="admin-spacer"></span>
-  <button class="admin-btn" onclick="go('dash');renderDash()">대시보드 새로고침</button>
+  <button class="admin-btn" onclick="go('view');renderView()">대시보드 새로고침</button>
   <button class="admin-btn danger" onclick="clearAllData()">데이터 전체 삭제</button>
 </div>
 
@@ -968,13 +945,12 @@ window.pickTag = function(el, group) {
 // ─── NAV ───
 window.go = function(screen) {
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
-  const order=['form','group','eval','dash','present'];
+  const order=['form','view','eval','present'];
   document.querySelectorAll('.nav-btn').forEach((b,i)=>{ if(order[i]===screen) b.classList.add('active'); });
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
   document.getElementById('screen-'+screen).classList.add('active');
-  if(screen==='group')   window.renderGroup?.();
+  if(screen==='view')    window.renderView?.();
   if(screen==='eval')    window.renderEval?.();
-  if(screen==='dash')    window.renderDash?.();
   if(screen==='present') window.renderPresentSelector?.();
 };
 
@@ -991,16 +967,7 @@ function startTimer(){
 }
 startTimer();
 
-// Firebase 설정 완료 여부 체크 (설정 전이면 배너 유지)
-setTimeout(()=>{
-  const banner=document.getElementById('setup-banner');
-  if(banner){
-    // 실제 Firebase 연결 후에는 배너 숨김
-    try{
-      if(window.firebaseConnected) banner.style.display='none';
-    }catch(e){}
-  }
-},2000);
+
 </script>
 </body>
 </html>
