@@ -24,24 +24,14 @@ const app = initializeApp(firebaseConfig);
 const db  = getDatabase(app);
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// ✅ Anthropic API 키 설정
-//    ⚠️  GitHub 공개 레포에 올리지 마세요.
-//    워크샵 종료 후 키를 폐기하거나 비공개 레포를 사용하세요.
+// ✅ Cloudflare Worker 프록시 URL
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-const ANTHROPIC_API_KEY ='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';
+const PROXY_URL = 'https://bitter-credit-1141.woosunchae.workers.dev';
 
 async function callClaude(prompt, maxTokens = 1500) {
-  if (!ANTHROPIC_API_KEY || ANTHROPIC_API_KEY.includes('여기에')) {
-    throw new Error('ANTHROPIC_API_KEY를 설정해주세요. HTML 상단의 ANTHROPIC_API_KEY 변수에 키를 입력하세요.');
-  }
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
+  const res = await fetch(PROXY_URL, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': ANTHROPIC_API_KEY,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true',
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: 'claude-sonnet-4-20250514',
       max_tokens: maxTokens,
