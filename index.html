@@ -23,6 +23,39 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db  = getDatabase(app);
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ✅ Anthropic API 키 설정
+//    ⚠️  GitHub 공개 레포에 올리지 마세요.
+//    워크샵 종료 후 키를 폐기하거나 비공개 레포를 사용하세요.
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+const ANTHROPIC_API_KEY ='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';
+
+async function callClaude(prompt, maxTokens = 1500) {
+  if (!ANTHROPIC_API_KEY || ANTHROPIC_API_KEY.includes('여기에')) {
+    throw new Error('ANTHROPIC_API_KEY를 설정해주세요. HTML 상단의 ANTHROPIC_API_KEY 변수에 키를 입력하세요.');
+  }
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: maxTokens,
+      messages: [{ role: 'user', content: prompt }],
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`API 오류 (${res.status}): ${err}`);
+  }
+  const data = await res.json();
+  return data.content.map(c => c.text || '').join('');
+}
+
 let ideas = {}, evals = {}, clusters = null;
 
 const SAMPLE_IDEAS = [
@@ -117,39 +150,118 @@ window.submitEval=async function(ideaKey){
 };
 
 // ── 클러스터링 ──
-window.runClustering=async function(){
-  const arr=Object.entries(ideas).map(([k,v])=>({key:k,...v}));
-  if(arr.length<3){alert('실제 아이디어가 3개 이상 필요합니다.');return;}
-  const btn=document.getElementById('cluster-run-btn');
-  btn.disabled=true; btn.innerHTML='<span class="spinner"></span> AI 분석 중...';
-  const prompt=`다음 워크샵 아이디어들을 주제별로 3~6개 클러스터로 묶어주세요.\n\n${arr.map((idea,i)=>`[${i+1}] KEY:${idea.key} / [${idea.group}] ${idea.name}: ${idea.title} — 문제: ${idea.problem} / 해결: ${idea.solution}`).join('\n')}\n\n반드시 아래 JSON만 출력:\n{"clusters":[{"name":"이름(10자이내)","desc":"설명(20자이내)","keys":["KEY1"]}]}`;
-  try{
-    const res=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:1200,messages:[{role:'user',content:prompt}]})});
-    const data=await res.json();
-    const text=data.content.map(c=>c.text||'').join('');
-    const parsed=JSON.parse(text.replace(/```json|```/g,'').trim());
-    await set(ref(db,'clusters'),parsed.clusters);
+window.runClustering = async function() {
+  const arr = Object.entries(ideas).map(([k,v]) => ({key:k,...v}));
+  if(arr.length < 3){ alert('실제 아이디어가 3개 이상 필요합니다.'); return; }
+
+  const btn = document.getElementById('cluster-run-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> AI 분석 중...';
+
+  // 상태 표시
+  const statusEl = document.getElementById('cluster-status');
+  if(statusEl) { statusEl.style.display='block'; statusEl.textContent = `🔍 ${arr.length}개 아이디어 분석 중...`; }
+
+  const prompt = `다음 워크샵 아이디어들을 주제별로 3~6개 클러스터로 묶어주세요.
+
+${arr.map((idea,i) => `[${i+1}] KEY:${idea.key} / [${idea.group}] ${idea.name}: ${idea.title} — 문제: ${idea.problem} / 해결: ${idea.solution}`).join('\n')}
+
+반드시 아래 JSON만 출력 (마크다운 코드블록 없이):
+{"clusters":[{"name":"이름(10자이내)","desc":"설명(20자이내)","keys":["KEY1"]}]}`;
+
+  try {
+    const text = await callClaude(prompt, 1200);
+    const parsed = JSON.parse(text.replace(/```json|```/g,'').trim());
+    await set(ref(db,'clusters'), parsed.clusters);
+    if(statusEl) { statusEl.textContent = `✅ ${parsed.clusters.length}개 클러스터로 분류 완료`; statusEl.style.color='var(--accent2)'; }
     alert('✅ 클러스터링 완료!');
-  }catch(e){alert('오류: '+e.message);}
-  btn.disabled=false; btn.innerHTML='✦ 클러스터링 재실행';
+  } catch(e) {
+    if(statusEl) { statusEl.textContent = '❌ 오류: ' + e.message; statusEl.style.color='#f87171'; }
+    alert('오류: ' + e.message);
+  }
+
+  btn.disabled = false;
+  btn.innerHTML = '✦ 클러스터링 재실행';
 };
 
 // ── 발표문 생성 ──
-window.generateAll=async function(){
-  const btn=document.querySelector('.generate-all-btn');
-  btn.textContent='생성 중...'; btn.disabled=true;
-  const d=window.getPresentData();
-  const prompt=`워크샵 아이디어 사업화 발표 자료를 보완해주세요.\n아이디어:${d.title}\n타겟:${d.target}\n문제:${d.problem}\n해결:${d.summary}\n기대효과:${d.effect||'미작성'}\n실행:${d.effort||'미작성'}\n비용:${d.cost||'미작성'}\n리스크:${d.risk||'미작성'}\n조직:${d.org||'미작성'}\n이유:${d.why||'미작성'}\n시장:${d.market||'미작성'}\n조건:${d.condition||'미작성'}\n\n미작성 항목을 채우고 아래 형식으로 출력:\n[기대효과]: 내용\n[실행계획]: 내용\n[비용]: 내용\n[리스크]: 내용\n[제안조직]: 내용\n[시장환경]: 내용\n[성공조건]: 내용\n[발표멘트]: 부사장님께 3분 구어체 발표 멘트`;
-  try{
-    const res=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:1500,messages:[{role:'user',content:prompt}]})});
-    const data=await res.json();
-    const text=data.content.map(c=>c.text||'').join('');
-    const fm={'기대효과':'ps-effect','실행계획':'ps-effort','비용':'ps-cost','리스크':'ps-risk','제안조직':'ps-org','시장환경':'ps-market','성공조건':'ps-condition'};
-    Object.entries(fm).forEach(([k,id])=>{const m=text.match(new RegExp(`\\[${k}\\]:\\s*([^\\[]*)`));if(m){const el=document.getElementById(id);if(el&&!el.value.trim())el.value=m[1].trim();}});
-    const mm=text.match(/\[발표멘트\]:\s*([\s\S]*)/);
-    if(mm){const out=document.getElementById('ai-msg-output');out.style.display='block';out.textContent=mm[1].trim();}
-  }catch(e){alert('오류: '+e.message);}
-  btn.textContent='✦ AI로 전체 내용 보완하기'; btn.disabled=false;
+window.generateAll = async function() {
+  const btn = document.querySelector('.generate-all-btn');
+  btn.textContent = '✦ AI 분석 중...';
+  btn.disabled = true;
+
+  // 진행 상태 표시
+  const statusEl = document.getElementById('ai-status');
+  if(statusEl) { statusEl.style.display='block'; statusEl.textContent='📝 내용 분석 중...'; }
+
+  const d = window.getPresentData();
+
+  const prompt = `워크샵 아이디어 사업화 발표 자료를 보완해주세요.
+
+아이디어: ${d.title}
+타겟: ${d.target}
+문제: ${d.problem}
+해결: ${d.summary}
+기대효과: ${d.effect||'미작성'}
+실행: ${d.effort||'미작성'}
+비용: ${d.cost||'미작성'}
+리스크: ${d.risk||'미작성'}
+조직: ${d.org||'미작성'}
+이유: ${d.why||'미작성'}
+시장: ${d.market||'미작성'}
+조건: ${d.condition||'미작성'}
+
+미작성 항목을 채우고 아래 형식으로 출력 (각 항목은 2~3문장):
+[기대효과]: 내용
+[실행계획]: 내용
+[비용]: 내용
+[리스크]: 내용
+[제안조직]: 내용
+[시장환경]: 내용
+[성공조건]: 내용
+[발표멘트]: 부사장님께 3분 구어체 발표 멘트 (현장감 있게)`;
+
+  try {
+    if(statusEl) statusEl.textContent = '🤖 Claude가 내용 작성 중...';
+    const text = await callClaude(prompt, 1800);
+
+    const fm = {
+      '기대효과':'ps-effect',
+      '실행계획':'ps-effort',
+      '비용':'ps-cost',
+      '리스크':'ps-risk',
+      '제안조직':'ps-org',
+      '시장환경':'ps-market',
+      '성공조건':'ps-condition'
+    };
+
+    let filled = 0;
+    Object.entries(fm).forEach(([k,id]) => {
+      const m = text.match(new RegExp(`\\[${k}\\]:\\s*([^\\[]*)`));
+      if(m) {
+        const el = document.getElementById(id);
+        if(el && !el.value.trim()) { el.value = m[1].trim(); filled++; }
+      }
+    });
+
+    const mm = text.match(/\[발표멘트\]:\s*([\s\S]*)/);
+    if(mm) {
+      const out = document.getElementById('ai-msg-output');
+      out.style.display = 'block';
+      out.textContent = mm[1].trim();
+    }
+
+    if(statusEl) {
+      statusEl.textContent = `✅ ${filled}개 항목 자동 보완 완료`;
+      statusEl.style.color = 'var(--accent2)';
+    }
+  } catch(e) {
+    if(statusEl) { statusEl.textContent = '❌ 오류: ' + e.message; statusEl.style.color='#f87171'; }
+    alert('오류: ' + e.message);
+  }
+
+  btn.textContent = '✦ AI로 전체 내용 보완하기';
+  btn.disabled = false;
 };
 
 // ── 아이디어 현황 (통합) ──
@@ -318,6 +430,8 @@ window.loadPresent=function(){
   document.getElementById('ps-why').value=idea.reason||'';
   ['ps-summary','ps-effect','ps-effort','ps-cost','ps-risk','ps-org','ps-market','ps-condition'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('ai-msg-output').style.display='none';
+  const statusEl=document.getElementById('ai-status');
+  if(statusEl){statusEl.style.display='none';}
 };
 window.getPresentData=function(){
   return{title:document.getElementById('ps-title').textContent,summary:document.getElementById('ps-summary').value,target:document.getElementById('ps-target').value,problem:document.getElementById('ps-problem').value,effect:document.getElementById('ps-effect').value,effort:document.getElementById('ps-effort').value,cost:document.getElementById('ps-cost').value,risk:document.getElementById('ps-risk').value,org:document.getElementById('ps-org').value,why:document.getElementById('ps-why').value,market:document.getElementById('ps-market').value,condition:document.getElementById('ps-condition').value};
@@ -413,6 +527,7 @@ select option{background:var(--surface2);}
 .cluster-run-btn{display:flex;align-items:center;gap:6px;padding:10px 18px;background:rgba(79,142,247,.15);border:1px solid rgba(79,142,247,.4);border-radius:var(--radius-sm);color:var(--accent);font-size:13px;font-weight:700;font-family:inherit;cursor:pointer;white-space:nowrap;}
 .cluster-run-btn:hover{background:rgba(79,142,247,.25);}
 .cluster-run-btn:disabled{opacity:.5;cursor:not-allowed;}
+.cluster-status{font-size:12px;padding:8px 12px;background:rgba(79,142,247,.08);border-radius:var(--radius-sm);color:var(--accent);margin-top:8px;display:none;}
 .cluster-result-block{margin-bottom:14px;}
 .cluster-group-header{display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:var(--radius-sm) var(--radius-sm) 0 0;border:1px solid var(--border);border-bottom:none;}
 .cluster-group-name{font-size:14px;font-weight:700;}
@@ -468,9 +583,11 @@ select option{background:var(--surface2);}
 .biz-field label{font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;display:block;margin-bottom:6px;}
 .biz-field textarea,.biz-field input{width:100%;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-size:13px;font-family:inherit;resize:none;transition:border-color .15s;}
 .biz-field textarea:focus,.biz-field input:focus{outline:none;border-color:var(--accent);}
+.ai-status{font-size:12px;padding:8px 12px;background:rgba(110,231,183,.06);border:1px solid rgba(110,231,183,.15);border-radius:var(--radius-sm);color:var(--accent2);margin-top:10px;display:none;}
 .ai-output{margin-top:10px;padding:14px;background:rgba(110,231,183,.05);border:1px solid rgba(110,231,183,.15);border-radius:var(--radius-sm);font-size:13px;color:var(--text2);line-height:1.7;white-space:pre-wrap;}
 .generate-all-btn{width:100%;padding:13px;background:linear-gradient(135deg,var(--accent),#7b5ea7);border:none;border-radius:var(--radius-sm);color:white;font-size:15px;font-weight:700;font-family:inherit;cursor:pointer;margin-top:6px;}
 .generate-all-btn:hover{opacity:.9;}
+.generate-all-btn:disabled{opacity:.6;cursor:not-allowed;}
 .spinner{display:inline-block;width:12px;height:12px;border:2px solid rgba(255,255,255,.3);border-top-color:white;border-radius:50%;animation:spin .6s linear infinite;}
 @keyframes spin{to{transform:rotate(360deg)}}
 /* admin */
@@ -586,9 +703,12 @@ select option{background:var(--surface2);}
     <div id="view-all-panel">
       <div class="dash-top" id="dash-stats"></div>
       <div class="cluster-run-box">
-        <div class="cluster-run-info">
-          <strong>✦ AI 아이디어 클러스터링 (운영자 전용)</strong>
-          전체 아이디어를 유사 주제끼리 자동 분류합니다. 수집 완료 후 실행하세요.
+        <div>
+          <div class="cluster-run-info">
+            <strong>✦ AI 아이디어 클러스터링 (운영자 전용)</strong>
+            전체 아이디어를 유사 주제끼리 자동 분류합니다. 수집 완료 후 실행하세요.
+          </div>
+          <div class="cluster-status" id="cluster-status"></div>
         </div>
         <button class="cluster-run-btn" id="cluster-run-btn" onclick="runClustering()">✦ 클러스터링 실행</button>
       </div>
@@ -674,6 +794,7 @@ select option{background:var(--surface2);}
         <div class="slide-title">발표 메시지 자동 생성</div>
         <p style="font-size:13px;color:var(--text2);margin-bottom:10px">위 내용을 바탕으로 AI가 빈 항목을 채우고 3분 발표 멘트를 작성합니다.</p>
         <button class="generate-all-btn" onclick="generateAll()">✦ AI로 전체 내용 보완하기</button>
+        <div class="ai-status" id="ai-status"></div>
         <div id="ai-msg-output" class="ai-output" style="display:none;margin-top:12px"></div>
       </div>
     </div>
