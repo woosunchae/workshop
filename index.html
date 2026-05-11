@@ -43,7 +43,8 @@ async function callClaude(prompt, maxTokens = 1500) {
 
 // 현재 사용자
 let currentUser = null; // { name, group, isAdmin }
-let ideas = {}, evals = {}, clusters = null;
+let ideas = {}, evals = {}, clusters = null, finalPresentations = {}, presentDrafts = {};
+let _presentKey = null, _draftListener = null, _isSaving = false;
 
 const SAMPLE_IDEAS = [
   { key:'s1', name:'홍길동', group:'1조', title:'앱 내 실시간 CS 채팅 기능', target:'불만 고객', problem:'문의 후 평균 2일 소요, 이메일·전화 혼재로 히스토리 관리 불가', solution:'앱 내 채팅 모듈 추가, AI 자동 분류, 30분 내 첫 응답 보장', reason:'고객 이탈 방지 — CS 불만이 이탈 원인 1위', isSample:true },
@@ -53,11 +54,51 @@ const SAMPLE_IDEAS = [
   { key:'s5', name:'정하은', group:'5조', title:'VIP 고객 전담 매니저 배정', target:'VIP 고객', problem:'상위 10% 고객이 70% 매출 기여하나 동일한 CS 경험', solution:'연간 구매액 기준 VIP 선정, 전담 매니저 1:1 배정', reason:'차별화 경쟁력 — 프리미엄 경험으로 VIP 이탈률 50% 감소', isSample:true },
 ];
 
+
+// ━━━ 샘플 데이터 (실제 데이터 없을 때 표시) ━━━
+const SAMPLE_EVALS = [
+  { ideaKey:'s1', name:'김평가', group:'1조', scores:{c1:5,c2:4,c3:5,c4:4}, total:18, at:'2026-05-07T09:00:00', isSample:true },
+  { ideaKey:'s1', name:'이평가', group:'1조', scores:{c1:4,c2:5,c3:4,c4:4}, total:17, at:'2026-05-07T09:05:00', isSample:true },
+  { ideaKey:'s2', name:'박평가', group:'2조', scores:{c1:4,c2:3,c3:4,c4:5}, total:16, at:'2026-05-07T09:10:00', isSample:true },
+  { ideaKey:'s2', name:'최평가', group:'2조', scores:{c1:3,c2:4,c3:4,c4:4}, total:15, at:'2026-05-07T09:15:00', isSample:true },
+  { ideaKey:'s3', name:'정평가', group:'3조', scores:{c1:4,c2:4,c3:3,c4:5}, total:16, at:'2026-05-07T09:20:00', isSample:true },
+  { ideaKey:'s4', name:'강평가', group:'4조', scores:{c1:5,c2:3,c3:5,c4:3}, total:16, at:'2026-05-07T09:25:00', isSample:true },
+  { ideaKey:'s5', name:'조평가', group:'5조', scores:{c1:5,c2:4,c3:5,c4:5}, total:19, at:'2026-05-07T09:30:00', isSample:true },
+];
+
+const SAMPLE_CLUSTERS = [
+  { name:'CS 혁신', desc:'고객 서비스 개선', keys:['s1','s2'] },
+  { name:'자동화/보상', desc:'운영 자동화', keys:['s3','s4'] },
+  { name:'VIP 전략', desc:'프리미엄 고객 관리', keys:['s5'] },
+];
+
+const SAMPLE_FINAL = {
+  '1': {
+    group:'1조', name:'홍길동', ideaKey:'s1', title:'앱 내 실시간 CS 채팅 기능',
+    target:'불만 고객',
+    problem:'문의 후 평균 2일 소요, 이메일·전화 혼재로 히스토리 관리 불가',
+    summary:'앱 내 채팅 모듈을 도입해 고객 문의를 실시간으로 처리하고, AI가 자동 분류 후 담당자에게 배정하여 30분 내 첫 응답을 보장하는 CS 혁신 서비스.',
+    effect:'CS 만족도 40% 향상, 평균 응답 시간 2일 → 30분 이내, 고객 이탈률 15%p 감소',
+    effort:'개발 3개월 (채팅 모듈 + AI 분류), 외부 SDK 연동 필요, 6개월 내 MVP 출시 가능',
+    cost:'초기 개발비 약 1.5억, 월 운영비 약 500만원 (서버+SDK 라이선스)',
+    risk:'CS 담당자 교육 부담 — 단계적 전환으로 해소 / 개인정보 보호 이슈 — 암호화 채팅 적용',
+    org:'고객경험팀(주관) + IT개발팀(개발) + CS운영팀(운영)',
+    why:'CS 불만이 고객 이탈 원인 1위. 경쟁사 대비 응답 속도 3배 격차 존재, 선제 대응 필요',
+    market:'국내 이커머스 CS 자동화 시장 연 30% 성장, 카카오·네이버도 유사 서비스 확대 중',
+    condition:'30분 내 첫 응답률 95% 이상 달성, 채팅 해결률 70% 이상, 고객 만족도(CSAT) 4.0점 이상',
+    speech:'안녕하세요, 1조입니다. 저희가 주목한 문제는 고객 이탈의 핵심 원인인 CS 응답 지연입니다. 현재 평균 2일이 걸리는 응답 시간, 과연 우리 고객들이 기다려줄까요? 저희는 앱 내 실시간 채팅 모듈을 도입해 30분 이내 첫 응답을 보장하는 서비스를 제안합니다. AI 자동 분류로 CS 인력 효율을 높이면서 고객 만족도를 40% 향상시킬 수 있습니다. 개발 3개월, 6개월 안에 전사 적용이 가능합니다. 지금이 바로 CS 혁신의 적기입니다.',
+    submittedAt:'2026-05-07T10:00:00', isSample:true
+  },
+};
+
 function getAllIdeas() {
   const real = Object.entries(ideas).map(([k,v])=>({key:k,...v}));
   return real.length > 0 ? real : SAMPLE_IDEAS;
 }
-function getEvalArr() { return Object.values(evals); }
+function getEvalArr() {
+  const real = Object.values(evals);
+  return real.length > 0 ? real : SAMPLE_EVALS;
+}
 function getAvgScore(key) {
   const sc = getEvalArr().filter(e=>e.ideaKey===key).map(e=>e.total);
   return sc.length ? sc.reduce((a,b)=>a+b,0)/sc.length : null;
@@ -88,7 +129,8 @@ const CRITERIA = [
 
 onValue(ref(db,'ideas'),    s=>{ ideas    = s.val()||{}; _refresh(); });
 onValue(ref(db,'evals'),    s=>{ evals    = s.val()||{}; _refresh(); });
-onValue(ref(db,'clusters'), s=>{ clusters = s.val()||null; _refresh(); });
+onValue(ref(db,'clusters'),           s=>{ clusters           = s.val()||null; _refresh(); });
+onValue(ref(db,'finalPresentations'), s=>{ finalPresentations = s.val()||{};   _refresh(); });
 
 function _refresh() {
   if(!currentUser) return;
@@ -97,6 +139,7 @@ function _refresh() {
   if(a.id==='screen-view')    renderView();
   if(a.id==='screen-eval')    renderEval();
   if(a.id==='screen-present') renderPresentSelector();
+  if(a.id==='screen-final')   renderFinal();
   const nc = document.getElementById('nav-cnt');
   if(nc) nc.textContent = Object.keys(ideas).length || '';
 }
@@ -220,7 +263,7 @@ window.generateAll = async function() {
   const statusEl = document.getElementById('ai-status');
   if(statusEl){ statusEl.style.display='block'; statusEl.textContent='📝 내용 분석 중...'; }
   const d = window.getPresentData();
-  const prompt = `워크샵 아이디어 사업화 발표 자료를 보완해주세요.\n아이디어: ${d.title}\n타겟: ${d.target}\n문제: ${d.problem}\n해결: ${d.summary}\n기대효과: ${d.effect||'미작성'}\n실행: ${d.effort||'미작성'}\n비용: ${d.cost||'미작성'}\n리스크: ${d.risk||'미작성'}\n조직: ${d.org||'미작성'}\n이유: ${d.why||'미작성'}\n시장: ${d.market||'미작성'}\n조건: ${d.condition||'미작성'}\n\n미작성 항목을 채우고 아래 형식으로 출력 (각 항목은 2~3문장):\n[기대효과]: 내용\n[실행계획]: 내용\n[비용]: 내용\n[리스크]: 내용\n[제안조직]: 내용\n[시장환경]: 내용\n[성공조건]: 내용\n[발표멘트]: 부사장님께 3분 구어체 발표 멘트 (현장감 있게)`;
+  const prompt = `워크샵 아이디어 사업화 발표 자료를 보완해주세요.\n아이디어: ${d.title}\n타겟: ${d.target}\n문제: ${d.problem}\n해결: ${d.summary}\n기대효과: ${d.effect||'미작성'}\n실행: ${d.effort||'미작성'}\n비용: ${d.cost||'미작성'}\n리스크: ${d.risk||'미작성'}\n조직: ${d.org||'미작성'}\n이유: ${d.why||'미작성'}\n시장: ${d.market||'미작성'}\n조건: ${d.condition||'미작성'}\n\n미작성 항목을 채우고 아래 형식으로 출력 (각 항목은 2~3문장):\n[기대효과]: 내용\n[실행계획]: 내용\n[비용]: 내용\n[리스크]: 내용\n[제안조직]: 내용\n[시장환경]: 내용\n[성공조건]: 이 서비스가 성공하기 위해 반드시 충족해야 할 핵심 기능이나 측정 지표 중심으로 작성\n[발표멘트]: 전체 구성원 앞에서 3분간 발표하는 구어체 멘트 (보고가 아닌 발표 말투, 청중을 향한 호소력 있는 문장, '~드립니다' 대신 '~합니다' 체)`;
   try {
     if(statusEl) statusEl.textContent='🤖 Claude가 내용 작성 중...';
     const text = await callClaude(prompt, 1800);
@@ -231,7 +274,7 @@ window.generateAll = async function() {
       if(m){const el=document.getElementById(id);if(el&&!el.value.trim()){el.value=m[1].trim();filled++;}}
     });
     const mm=text.match(/\[발표멘트\]:\s*([\s\S]*)/);
-    if(mm){const out=document.getElementById('ai-msg-output');out.style.display='block';out.textContent=mm[1].trim();}
+    if(mm){const out=document.getElementById('ai-msg-output');out.style.display='block';out.textContent=mm[1].trim();window.onDraftChange?.();}
     if(statusEl){statusEl.textContent=`✅ ${filled}개 항목 자동 보완 완료`;statusEl.style.color='var(--accent2)';}
   } catch(e){
     if(statusEl){statusEl.textContent='❌ 오류: '+e.message;statusEl.style.color='#f87171';}
@@ -305,7 +348,8 @@ function renderDashPanel() {
     <div class="stat-card"><div class="num" style="color:var(--accent3)">${ea.length}</div><div class="lbl">평가 수</div></div>
     <div class="stat-card"><div class="num" style="color:#a78bfa">${scored}</div><div class="lbl">평가된 아이디어</div></div>`;
   const cel=document.getElementById('dash-clusters');
-  if(!clusters||!Array.isArray(clusters)){
+  const activeClusters = (clusters && Array.isArray(clusters)) ? clusters : (getEvalArr().some(e=>e.isSample) ? SAMPLE_CLUSTERS : null);
+  if(!activeClusters){
     const byG={};arr.forEach(i=>{if(!byG[i.group])byG[i.group]=[];byG[i.group].push(i);});
     cel.innerHTML='<div style="font-size:12px;color:var(--text3);margin-bottom:12px">클러스터링 전 — 조별로 표시 중.</div>'
       +['1조','2조','3조','4조','5조','6조','7조'].filter(g=>byG[g]?.length).map((g,gi)=>`
@@ -321,8 +365,8 @@ function renderDashPanel() {
             ${avg!==null?`<span class="ci-score">${avg.toFixed(1)}점</span>`:''}</div>`;}).join('')}</div>
         </div>`).join('');
   } else {
-    cel.innerHTML=`<div style="font-size:12px;color:var(--accent2);margin-bottom:12px">✦ AI 클러스터링 완료 — ${clusters.length}개 주제</div>`
-      +clusters.map((cl,ci)=>{
+    cel.innerHTML=`<div style="font-size:12px;color:var(--accent2);margin-bottom:12px">✦ AI 클러스터링 완료 — ${activeClusters.length}개 주제</div>`
+      +activeClusters.map((cl,ci)=>{
         const cli=arr.filter(i=>cl.keys?.includes(i.key));
         return`<div class="cluster-result-block">
           <div class="cluster-group-header" style="background:${COLORS[ci%7]}18;border-color:${COLORS[ci%7]}44">
@@ -394,29 +438,300 @@ window.setEvalScore = function(ideaKey,cKey,val,el){
 
 // ━━━ 발표 ━━━
 window.renderPresentSelector = function(){
-  const arr=getAllIdeas().filter(i=>!i.isSample);
-  const sel=document.getElementById('present-selector');
-  sel.innerHTML='<option value="">아이디어를 선택하세요</option>'+arr.map(i=>`<option value="${i.key}">[${i.group}] ${i.title}</option>`).join('');
+  const arr = getAllIdeas().filter(i=>!i.isSample);
+
+  // 순위 계산
+  const ranked = arr.map(idea=>{
+    const avg = getAvgScore(idea.key);
+    const cnt = getEvalArr().filter(e=>e.ideaKey===idea.key).length;
+    return {key:idea.key, avg, cnt};
+  }).filter(x=>x.cnt>0).sort((a,b)=>b.avg-a.avg);
+  const rankMap = {};
+  ranked.forEach((r,i)=>{ rankMap[r.key] = {rank:i+1, avg:r.avg}; });
+
+  const sel = document.getElementById('present-selector');
+  sel.innerHTML = '<option value="">아이디어를 선택하세요</option>'
+    + arr.map(i=>{
+        const r = rankMap[i.key];
+        const scoreStr = r ? ` | ${r.avg.toFixed(1)}점 · ${r.rank}위` : '';
+        return `<option value="${i.key}">[${i.group}] ${i.title}${scoreStr}</option>`;
+      }).join('');
+
+  // 카드 목록도 렌더
+  _renderPresentList(arr, rankMap);
 };
+
+function _renderPresentList(arr, rankMap) {
+  const listEl = document.getElementById('present-idea-list');
+  if(!listEl) return;
+  if(!arr.length){ listEl.innerHTML='<div class="empty-msg">아이디어가 없습니다.</div>'; return; }
+  listEl.innerHTML = arr.map(idea=>{
+    const r = rankMap[idea.key];
+    const avg = r ? r.avg.toFixed(1) : null;
+    const rank = r ? r.rank : null;
+    return `<div class="present-idea-row" onclick="document.getElementById('present-selector').value='${idea.key}';loadPresent();">
+      <div class="present-idea-left">
+        <span class="badge badge-group">${idea.group}</span>
+        <span class="present-idea-title">${idea.title}</span>
+        <span class="present-idea-name">${idea.name}</span>
+      </div>
+      <div class="present-idea-right">
+        ${avg!==null ? `<span class="present-score">${avg}점</span><span class="present-rank${rank<=3?' top':''}">🏆 ${rank}위</span><span class="present-grade">${getGrade(r.avg)}</span>` : '<span class="present-no-score">평가 없음</span>'}
+      </div>
+    </div>`;
+  }).join('');
+}
 window.loadPresent = function(){
-  const key=document.getElementById('present-selector').value;
-  const idea=ideas[key];const cont=document.getElementById('present-content');
-  if(!idea){cont.style.display='none';return;}
-  cont.style.display='block';
-  document.getElementById('ps-title').textContent=idea.title;
-  document.getElementById('ps-target').value=idea.target||'';
-  document.getElementById('ps-problem').value=idea.problem||'';
-  document.getElementById('ps-why').value=idea.reason||'';
-  ['ps-summary','ps-effect','ps-effort','ps-cost','ps-risk','ps-org','ps-market','ps-condition'].forEach(id=>document.getElementById(id).value='');
-  document.getElementById('ai-msg-output').style.display='none';
-  const s=document.getElementById('ai-status');if(s)s.style.display='none';
+  const key = document.getElementById('present-selector').value;
+  const idea = ideas[key];
+  const cont = document.getElementById('present-content');
+  if(!idea){ cont.style.display='none'; _detachDraftListener(); return; }
+
+  _presentKey = key;
+  cont.style.display = 'block';
+
+  // 아이디어 기본 정보 세팅
+  document.getElementById('ps-title').textContent = idea.title;
+
+  // 점수·순위 배지 업데이트
+  const _rkl = getAllIdeas().filter(i=>!i.isSample).map(idea2=>{
+    const avg=getAvgScore(idea2.key);const cnt=getEvalArr().filter(e=>e.ideaKey===idea2.key).length;
+    return{key:idea2.key,avg,cnt};
+  }).filter(x=>x.cnt>0).sort((a,b)=>b.avg-a.avg);
+  const _ril = _rkl.findIndex(r=>r.key===key);
+  const scoreEl = document.getElementById('ps-score-badge');
+  if(scoreEl) {
+    if(_ril>=0) {
+      scoreEl.style.display='flex';
+      scoreEl.innerHTML = `<span class="ps-score-num">${_rkl[_ril].avg.toFixed(1)}점</span><span class="ps-rank${_ril<3?' top':''}">🏆 ${_ril+1}위</span><span class="ps-grade">${getGrade(_rkl[_ril].avg)}</span><span class="ps-eval-cnt">${_rkl[_ril].cnt}명 평가</span>`;
+    } else {
+      scoreEl.style.display='none';
+    }
+  }
+  document.getElementById('ps-target').value  = idea.target  || '';
+  document.getElementById('ps-problem').value = idea.problem || '';
+  document.getElementById('ps-why').value     = idea.reason  || '';
+  ['ps-summary','ps-effect','ps-effort','ps-cost','ps-risk','ps-org','ps-market','ps-condition']
+    .forEach(id => document.getElementById(id).value = '');
+  document.getElementById('ai-msg-output').style.display = 'none';
+  const s = document.getElementById('ai-status'); if(s) s.style.display = 'none';
+
+  // 동시 편집 상태 표시 초기화
+  const syncEl = document.getElementById('collab-status');
+  if(syncEl) syncEl.textContent = '🔄 불러오는 중...';
+
+  // 기존 리스너 해제 후 새 리스너 등록
+  _detachDraftListener();
+  _attachDraftListener(key, idea);
+};
+
+function _detachDraftListener() {
+  if(_draftListener) { _draftListener(); _draftListener = null; }
+  _presentKey = null;
+}
+
+function _attachDraftListener(key, idea) {
+  const draftRef = ref(db, 'presentDrafts/' + key);
+  _draftListener = onValue(draftRef, snap => {
+    const draft = snap.val();
+    const syncEl = document.getElementById('collab-status');
+    if(!draft) {
+      if(syncEl) syncEl.textContent = '✏️ 새 초안 — 작성을 시작하세요';
+      return;
+    }
+    // 내가 저장 중일 때는 덮어쓰지 않음
+    if(_isSaving) return;
+    const fields = ['ps-summary','ps-effect','ps-effort','ps-cost','ps-risk','ps-org','ps-market','ps-condition'];
+    fields.forEach(id => {
+      const el = document.getElementById(id);
+      if(el && document.activeElement !== el) {
+        el.value = draft[id.replace('ps-','')] || '';
+      }
+    });
+    // speech 복원
+    const speechOut = document.getElementById('ai-msg-output');
+    if(draft.speech && speechOut) {
+      speechOut.style.display = 'block';
+      speechOut.textContent = draft.speech;
+    }
+    if(syncEl) {
+      const t = draft.updatedAt ? new Date(draft.updatedAt).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '';
+      syncEl.textContent = `✅ ${draft.updatedBy || ''}님이 ${t} 저장`;
+    }
+  });
+}
+
+// 필드 변경 시 Firebase에 자동 저장 (디바운스 1.5초)
+let _saveTimer = null;
+window.onDraftChange = async function() {
+  if(!_presentKey) return;
+  clearTimeout(_saveTimer);
+  const syncEl = document.getElementById('collab-status');
+  if(syncEl) syncEl.textContent = '⌛ 저장 중...';
+  _saveTimer = setTimeout(async () => {
+    _isSaving = true;
+    const d = window.getPresentData();
+    const speechEl = document.getElementById('ai-msg-output');
+    try {
+      await set(ref(db, 'presentDrafts/' + _presentKey), {
+        summary:d.summary, effect:d.effect, effort:d.effort,
+        cost:d.cost, risk:d.risk, org:d.org,
+        why:d.why, market:d.market, condition:d.condition,
+        speech: speechEl ? speechEl.textContent : '',
+        updatedBy: currentUser.name,
+        updatedAt: new Date().toISOString(),
+      });
+      if(syncEl) syncEl.textContent = `✅ ${currentUser.name}님이 방금 저장`;
+    } catch(e) {
+      if(syncEl) syncEl.textContent = '❌ 저장 실패';
+    }
+    setTimeout(()=>{ _isSaving = false; }, 500);
+  }, 1500);
 };
 window.getPresentData = function(){
   return{title:document.getElementById('ps-title').textContent,summary:document.getElementById('ps-summary').value,target:document.getElementById('ps-target').value,problem:document.getElementById('ps-problem').value,effect:document.getElementById('ps-effect').value,effort:document.getElementById('ps-effort').value,cost:document.getElementById('ps-cost').value,risk:document.getElementById('ps-risk').value,org:document.getElementById('ps-org').value,why:document.getElementById('ps-why').value,market:document.getElementById('ps-market').value,condition:document.getElementById('ps-condition').value};
 };
+
+// ━━━ 최종 발표자료 제출 ━━━
+window.submitFinalPresentation = async function() {
+  const d = window.getPresentData();
+  if(!d.title || d.title === '아이디어명') { alert('발표할 아이디어를 먼저 선택해주세요.'); return; }
+
+  const ideaKey = document.getElementById('present-selector').value;
+  const payload = {
+    group:     currentUser.group,
+    name:      currentUser.name,
+    ideaKey:   ideaKey,
+    title:     d.title,
+    target:    d.target,
+    problem:   d.problem,
+    summary:   d.summary,
+    effect:    d.effect,
+    effort:    d.effort,
+    cost:      d.cost,
+    risk:      d.risk,
+    org:       d.org,
+    why:       d.why,
+    market:    d.market,
+    condition: d.condition,
+    speech:    document.getElementById('ai-msg-output').textContent || '',
+    submittedAt: new Date().toISOString(),
+  };
+
+  // 점수·순위 확인용
+  const _rk = getAllIdeas().filter(i=>!i.isSample).map(idea=>{
+    const avg=getAvgScore(idea.key); const cnt=getEvalArr().filter(e=>e.ideaKey===idea.key).length;
+    return {key:idea.key,avg,cnt};
+  }).filter(x=>x.cnt>0).sort((a,b)=>b.avg-a.avg);
+  const _ri = _rk.findIndex(r=>r.key===ideaKey);
+  const _scoreStr = _ri>=0 ? ` (${_rk[_ri].avg.toFixed(1)}점 · ${_ri+1}위)` : '';
+  if(!confirm(`[${payload.group}] "${payload.title}"${_scoreStr}\n을 최종 발표자료로 제출하시겠습니까?`)) return;
+
+  // 제출 버튼에 점수 표기
+  const _rkf = getAllIdeas().filter(i=>!i.isSample).map(idea=>{
+    const avg=getAvgScore(idea.key);const cnt=getEvalArr().filter(e=>e.ideaKey===idea.key).length;
+    return{key:idea.key,avg,cnt};
+  }).filter(x=>x.cnt>0).sort((a,b)=>b.avg-a.avg);
+  const _rif = _rkf.findIndex(r=>r.key===ideaKey);
+  const _btnScore = _rif>=0 ? ` · ${_rkf[_rif].avg.toFixed(1)}점 ${_rif+1}위` : '';
+
+  const btn = document.getElementById('final-submit-btn');
+  btn.disabled = true; btn.textContent = '제출 중...';
+
+  try {
+    // 조별로 하나만 저장 (덮어쓰기)
+    await set(ref(db, 'finalPresentations/' + payload.group.replace('조','')), payload);
+    alert('✅ 최종 발표자료가 제출되었습니다!');
+    btn.textContent = '✓ 제출 완료';
+    btn.style.background = '#065f46';
+  } catch(e) {
+    alert('제출 실패: ' + e.message);
+    btn.disabled = false; btn.textContent = '최종 자료 제출하기 →';
+  }
+};
+
+// ━━━ 최종 발표자료 목록 렌더 ━━━
+window.renderFinal = function() {
+  const el = document.getElementById('final-cards');
+  if(!el) return;
+  const realEntries = Object.values(finalPresentations);
+  const entries = realEntries.length > 0 ? realEntries : Object.values(SAMPLE_FINAL);
+  if(!entries.length) {
+    el.innerHTML = '<div class="empty-msg">아직 제출된 최종 발표자료가 없습니다.</div>';
+    return;
+  }
+  // 조 순서 정렬
+  entries.sort((a,b) => a.group.localeCompare(b.group, 'ko'));
+  // 순위 계산 (실제 아이디어 기준)
+  const allIdeas = getAllIdeas().filter(i=>!i.isSample);
+  const ranked = allIdeas.map(idea=>{
+    const avg = getAvgScore(idea.key);
+    const cnt = getEvalArr().filter(e=>e.ideaKey===idea.key).length;
+    return {key:idea.key, avg, cnt};
+  }).filter(x=>x.cnt>0).sort((a,b)=>b.avg-a.avg);
+
+  el.innerHTML = entries.map(p => {
+    // 점수 정보
+    const avg    = p.ideaKey ? getAvgScore(p.ideaKey) : null;
+    const evalCnt= p.ideaKey ? getEvalArr().filter(e=>e.ideaKey===p.ideaKey).length : 0;
+    const rank   = p.ideaKey ? ranked.findIndex(r=>r.key===p.ideaKey)+1 : 0;
+    const grade  = avg!==null ? getGrade(avg) : '';
+    const scoreHtml = avg!==null ? `
+      <div class="final-score-row">
+        <div class="final-score-block">
+          <div class="final-score-num">${avg.toFixed(1)}</div>
+          <div class="final-score-sub">/ 20점 (${evalCnt}명 평가)</div>
+        </div>
+        ${rank>0?`<div class="final-rank-block"><span class="final-rank-num${rank<=3?' top':''}">🏆 ${rank}위</span></div>`:''}
+        <div class="final-grade">${grade}</div>
+        <div class="final-criteria-row">${CRITERIA.map(c=>{
+          const vs=getEvalArr().filter(e=>e.ideaKey===p.ideaKey).map(e=>e.scores?.[c.key]||0).filter(v=>v>0);
+          const ca=vs.length?(vs.reduce((a,b)=>a+b,0)/vs.length).toFixed(1):'-';
+          return`<div class="final-criterion"><div class="final-criterion-label">${c.label}</div><div class="final-criterion-val">${ca}</div></div>`;
+        }).join('')}</div>
+      </div>` : '';
+    return `
+    <div class="final-card">
+      <div class="final-card-header">
+        <div class="final-card-header-top">
+          <span class="final-group-badge">${p.group}</span>
+          ${p.isSample ? '<span class="final-sample-badge">샘플</span>' : ''}
+          <span class="final-card-meta">${p.name} · ${new Date(p.submittedAt).toLocaleString('ko-KR',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}</span>
+        </div>
+        <div class="final-card-title">${p.title}</div>
+        ${p.target ? `<div class="final-card-submitter">🎯 타겟: ${p.target}</div>` : ''}
+        ${scoreHtml}
+      </div>
+      <div class="final-body">
+        ${p.summary ? `
+        <div class="final-summary-box">
+          <div class="final-summary-label">💡 핵심 아이디어</div>
+          <div class="final-summary-text">${p.summary}</div>
+        </div>` : ''}
+        <div class="final-grid">
+          ${p.problem   ? `<div class="final-field full"><div class="final-label">🔥 고객이 겪는 문제</div><div class="final-value">${p.problem}</div></div>` : ''}
+          ${p.effect    ? `<div class="final-field accent"><div class="final-label">📈 기대 효과 / KPI</div><div class="final-value">${p.effect}</div></div>` : ''}
+          ${p.effort    ? `<div class="final-field"><div class="final-label">⚡ 실행 계획</div><div class="final-value">${p.effort}</div></div>` : ''}
+          ${p.cost      ? `<div class="final-field"><div class="final-label">💰 예상 비용</div><div class="final-value">${p.cost}</div></div>` : ''}
+          ${p.risk      ? `<div class="final-field"><div class="final-label">⚠️ 주요 리스크</div><div class="final-value">${p.risk}</div></div>` : ''}
+          ${p.org       ? `<div class="final-field full"><div class="final-label">🏢 제안 실행 조직</div><div class="final-value">${p.org}</div></div>` : ''}
+          ${p.why       ? `<div class="final-field"><div class="final-label">🚀 전략적 당위성</div><div class="final-value">${p.why}</div></div>` : ''}
+          ${p.market    ? `<div class="final-field"><div class="final-label">🌐 시장 환경</div><div class="final-value">${p.market}</div></div>` : ''}
+          ${p.condition ? `<div class="final-field full"><div class="final-label">✅ 성공 핵심 조건</div><div class="final-value">${p.condition}</div></div>` : ''}
+        </div>
+        ${p.speech ? `
+        <div class="final-speech-box">
+          <div class="final-speech-label">🎤 발표 멘트</div>
+          <div class="final-speech-text">${p.speech}</div>
+        </div>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+};
+
 window.clearAllData = async function(){
   if(!confirm('⚠️ 모든 데이터를 삭제합니다. 워크샵 종료 후에만 사용하세요.'))return;
-  await Promise.all([remove(ref(db,'ideas')),remove(ref(db,'evals')),remove(ref(db,'clusters'))]);
+  await Promise.all([remove(ref(db,'ideas')),remove(ref(db,'evals')),remove(ref(db,'clusters')),remove(ref(db,'finalPresentations'))]);
   alert('삭제 완료');
 };
 </script>
@@ -595,6 +910,113 @@ select option{background:var(--surface2);}
 .admin-btn{padding:6px 12px;font-size:12px;font-weight:600;font-family:inherit;border-radius:var(--radius-sm);cursor:pointer;border:1px solid var(--border2);background:var(--surface);color:var(--text2);}
 .admin-btn:hover{background:var(--surface2);}
 .admin-btn.danger{border-color:rgba(248,113,113,.4);color:#f87171;}
+/* 최종 제출 버튼 */
+.final-submit-btn{width:100%;padding:14px;background:linear-gradient(135deg,var(--accent2),#059669);border:none;border-radius:var(--radius-sm);color:#0a1f17;font-size:15px;font-weight:700;font-family:inherit;cursor:pointer;transition:all .15s;}
+.final-submit-btn:hover{opacity:.9;}
+.final-submit-btn:disabled{background:var(--text3);color:var(--text2);cursor:not-allowed;}
+
+/* 최종 발표자료 카드 */
+/* 최종 발표자료 — 프레젠테이션 스타일 */
+.final-wrap{padding:32px 24px 80px;max-width:960px;margin:0 auto;}
+.final-card{
+  background:linear-gradient(145deg,#1a1f35,#1e2438);
+  border:1px solid rgba(79,142,247,0.3);
+  border-radius:20px;padding:0;margin-bottom:40px;
+  overflow:hidden;box-shadow:0 8px 40px rgba(0,0,0,0.4);
+}
+.final-card-header{
+  background:linear-gradient(135deg,rgba(79,142,247,0.25),rgba(110,231,183,0.15));
+  padding:28px 32px 24px;border-bottom:1px solid rgba(255,255,255,0.08);
+}
+.final-card-header-top{display:flex;align-items:center;gap:12px;margin-bottom:10px;}
+.final-group-badge{
+  font-size:13px;font-weight:800;background:var(--accent);color:white;
+  padding:4px 14px;border-radius:20px;letter-spacing:.04em;
+}
+.final-sample-badge{
+  font-size:11px;font-weight:700;background:rgba(245,158,11,0.3);color:var(--accent3);
+  padding:3px 10px;border-radius:20px;border:1px solid rgba(245,158,11,0.4);
+}
+.final-card-meta{font-size:12px;color:rgba(255,255,255,0.4);margin-left:auto;}
+.final-card-title{font-size:26px;font-weight:800;color:white;line-height:1.3;letter-spacing:-.01em;}
+.final-card-submitter{font-size:13px;color:rgba(255,255,255,0.5);margin-top:6px;}
+.final-body{padding:28px 32px 32px;}
+.final-summary-box{
+  background:rgba(110,231,183,0.08);border:1px solid rgba(110,231,183,0.2);
+  border-radius:12px;padding:18px 20px;margin-bottom:24px;
+}
+.final-summary-label{font-size:11px;font-weight:700;color:var(--accent2);text-transform:uppercase;letter-spacing:.1em;margin-bottom:8px;}
+.final-summary-text{font-size:16px;color:var(--text);line-height:1.7;font-weight:400;}
+.final-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px;}
+.final-field{
+  background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.07);
+  border-radius:12px;padding:16px 18px;
+}
+.final-field.full{grid-column:1/-1;}
+.final-field.accent{border-color:rgba(79,142,247,0.25);background:rgba(79,142,247,0.06);}
+.final-label{
+  font-size:11px;font-weight:700;color:var(--text3);
+  text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;
+  display:flex;align-items:center;gap:5px;
+}
+.final-value{font-size:15px;color:var(--text);line-height:1.65;font-weight:400;}
+.final-speech-box{
+  background:linear-gradient(135deg,rgba(167,139,250,0.1),rgba(79,142,247,0.08));
+  border:1px solid rgba(167,139,250,0.3);border-radius:14px;
+  padding:22px 24px;margin-top:6px;
+}
+.final-speech-label{
+  font-size:12px;font-weight:700;color:#a78bfa;
+  text-transform:uppercase;letter-spacing:.1em;margin-bottom:12px;
+  display:flex;align-items:center;gap:6px;
+}
+.final-speech-text{
+  font-size:17px;color:rgba(255,255,255,0.9);line-height:1.9;
+  font-weight:400;white-space:pre-wrap;
+}
+.final-divider{height:1px;background:rgba(255,255,255,0.06);margin:20px 0;}
+
+/* 동시편집 상태바 */
+.collab-bar{display:flex;align-items:center;gap:10px;padding:10px 16px;background:rgba(110,231,183,0.06);border:1px solid rgba(110,231,183,0.2);border-radius:var(--radius-sm);margin-bottom:14px;flex-wrap:wrap;}
+.collab-icon{font-size:16px;}
+.collab-status{margin-left:auto;font-size:12px;font-weight:600;color:var(--accent2);}
+
+/* 최종 발표자료 점수 영역 */
+.final-score-row{display:flex;align-items:center;gap:14px;margin-top:14px;padding:14px 16px;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);border-radius:10px;flex-wrap:wrap;}
+.final-score-block{display:flex;align-items:baseline;gap:6px;}
+.final-score-num{font-size:28px;font-weight:800;color:var(--accent3);}
+.final-score-sub{font-size:12px;color:rgba(255,255,255,0.45);}
+.final-rank-block{display:flex;align-items:center;}
+.final-rank-num{font-size:15px;font-weight:700;color:var(--text2);background:rgba(255,255,255,0.06);padding:4px 12px;border-radius:20px;}
+.final-rank-num.top{color:var(--accent3);}
+.final-grade{font-size:14px;font-weight:700;color:var(--accent2);}
+.final-criteria-row{display:flex;gap:10px;margin-left:auto;flex-wrap:wrap;}
+.final-criterion{text-align:center;}
+.final-criterion-label{font-size:10px;color:rgba(255,255,255,0.35);margin-bottom:2px;}
+.final-criterion-val{font-size:14px;font-weight:700;color:var(--text);}
+
+/* 아이디어 구체화 — 아이디어 목록 */
+.present-idea-list{display:flex;flex-direction:column;gap:6px;margin-top:8px;}
+.present-idea-row{display:flex;align-items:center;justify-content:space-between;padding:11px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;transition:all .15s;gap:10px;flex-wrap:wrap;}
+.present-idea-row:hover{border-color:var(--accent);background:rgba(79,142,247,0.06);}
+.present-idea-left{display:flex;align-items:center;gap:8px;flex:1;min-width:0;}
+.present-idea-title{font-size:14px;font-weight:600;color:var(--text);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.present-idea-name{font-size:11px;color:var(--text3);white-space:nowrap;}
+.present-idea-right{display:flex;align-items:center;gap:8px;flex-shrink:0;}
+.present-score{font-size:15px;font-weight:800;color:var(--accent3);}
+.present-rank{font-size:12px;font-weight:700;color:var(--text2);background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:12px;}
+.present-rank.top{color:var(--accent3);}
+.present-grade{font-size:12px;color:var(--accent2);}
+.present-no-score{font-size:11px;color:var(--text3);}
+
+/* 슬라이드 점수 배지 */
+.ps-score-badge{display:flex;align-items:center;gap:10px;margin-top:10px;padding:10px 14px;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);border-radius:8px;flex-wrap:wrap;}
+.ps-score-num{font-size:20px;font-weight:800;color:var(--accent3);}
+.ps-rank{font-size:13px;font-weight:700;color:var(--text2);background:rgba(255,255,255,0.06);padding:3px 10px;border-radius:12px;}
+.ps-rank.top{color:var(--accent3);}
+.ps-grade{font-size:13px;font-weight:600;color:var(--accent2);}
+.ps-eval-cnt{font-size:11px;color:var(--text3);margin-left:auto;}
+
 </style>
 </head>
 <body>
@@ -639,7 +1061,8 @@ select option{background:var(--surface2);}
     <button class="nav-btn active" onclick="go('form')">① 아이디어 입력</button>
     <button class="nav-btn" onclick="go('view')">② 아이디어 현황 <span class="nav-cnt" id="nav-cnt"></span></button>
     <button class="nav-btn" onclick="go('eval')">③ 평가</button>
-    <button class="nav-btn" onclick="go('present')">④ 발표 자료</button>
+    <button class="nav-btn" onclick="go('present')">④ 아이디어 구체화</button>
+    <button class="nav-btn" onclick="go('final')">⑤ 최종 발표자료</button>
     <span class="nav-spacer"></span>
     <span class="nav-user" id="nav-user"></span>
     <span class="nav-status"><span class="live-dot"></span>실시간</span>
@@ -754,23 +1177,31 @@ select option{background:var(--surface2);}
     </div>
   </div>
 
-  <!-- ④ 발표 자료 -->
+  <!-- ④ 아이디어 구체화 -->
   <div class="screen" id="screen-present">
     <div class="present-wrap">
       <div class="form-header">
-        <h1>발표 자료 작성</h1>
-        <p>아이디어를 선택하면 사업화 검토 템플릿이 열립니다. 조별 토의 내용을 입력하고 AI 보완을 받으세요.</p>
+        <h1>아이디어 구체화</h1>
+        <p>아이디어를 선택하면 사업화 검토 템플릿이 열립니다. 조별 토의 내용을 입력하고 AI를 활용하여 보완해 보세요.</p>
       </div>
       <div class="eval-info-box">
-        <label>발표할 아이디어 선택</label>
-        <select id="present-selector" onchange="loadPresent()"><option value="">아이디어를 선택하세요</option></select>
+        <label>아이디어 선택</label>
+        <div id="present-idea-list" class="present-idea-list"></div>
+        <div style="margin-top:10px;font-size:12px;color:var(--text3);">또는 직접 선택:</div>
+        <select id="present-selector" onchange="loadPresent()" style="margin-top:6px;"><option value="">아이디어를 선택하세요</option></select>
       </div>
       <div id="present-content" style="display:none">
+        <div class="collab-bar">
+          <span class="collab-icon">👥</span>
+          <span style="font-size:13px;color:var(--text2)">동시 편집 중 — 같은 조 구성원과 실시간 공유됩니다</span>
+          <span class="collab-status" id="collab-status">아이디어를 선택하세요</span>
+        </div>
         <div class="slide">
           <div class="slide-num">Slide 01</div>
           <div class="slide-title" id="ps-title">아이디어명</div>
+          <div class="ps-score-badge" id="ps-score-badge" style="display:none;"></div>
           <div class="biz-grid">
-            <div class="biz-field full"><label>💡 핵심 아이디어 요약</label><textarea id="ps-summary" rows="2" placeholder="한 문단으로 이 아이디어의 핵심을 정리"></textarea></div>
+            <div class="biz-field full"><label>💡 핵심 아이디어 요약</label><textarea id="ps-summary" rows="2" placeholder="한 문단으로 이 아이디어의 핵심을 정리" oninput="onDraftChange()"></textarea></div>
             <div class="biz-field"><label>🎯 타겟 고객</label><input type="text" id="ps-target"></div>
             <div class="biz-field"><label>🔥 해결하는 고객 문제</label><textarea id="ps-problem" rows="2"></textarea></div>
           </div>
@@ -779,20 +1210,20 @@ select option{background:var(--surface2);}
           <div class="slide-num">Slide 02</div>
           <div class="slide-title">사업화 검토</div>
           <div class="biz-grid">
-            <div class="biz-field"><label>📈 기대 효과 / KPI</label><textarea id="ps-effect" rows="3" placeholder="측정 가능한 지표 중심으로"></textarea></div>
-            <div class="biz-field"><label>⚡ 실행 난이도 & 기간</label><textarea id="ps-effort" rows="3" placeholder="예) 개발 3개월, 외부 API 연동 필요"></textarea></div>
-            <div class="biz-field"><label>💰 필요 투자 / 비용</label><textarea id="ps-cost" rows="2" placeholder="대략적인 규모만도 OK"></textarea></div>
-            <div class="biz-field"><label>⚠️ 주요 리스크</label><textarea id="ps-risk" rows="2" placeholder="해결 방안도 함께"></textarea></div>
-            <div class="biz-field full"><label>🏢 제안 실행 조직</label><textarea id="ps-org" rows="2" placeholder="구체적인 부서명으로"></textarea></div>
+            <div class="biz-field"><label>📈 기대 효과 / KPI</label><textarea id="ps-effect" rows="3" placeholder="측정 가능한 지표 중심으로" oninput="onDraftChange()"></textarea></div>
+            <div class="biz-field"><label>⚡ 실행 난이도 & 기간</label><textarea id="ps-effort" rows="3" placeholder="예) 개발 3개월, 외부 API 연동 필요" oninput="onDraftChange()"></textarea></div>
+            <div class="biz-field"><label>💰 필요 투자 / 비용</label><textarea id="ps-cost" rows="2" placeholder="대략적인 규모만도 OK" oninput="onDraftChange()"></textarea></div>
+            <div class="biz-field"><label>⚠️ 주요 리스크</label><textarea id="ps-risk" rows="2" placeholder="해결 방안도 함께" oninput="onDraftChange()"></textarea></div>
+            <div class="biz-field full"><label>🏢 제안 실행 조직</label><textarea id="ps-org" rows="2" placeholder="구체적인 부서명으로" oninput="onDraftChange()"></textarea></div>
           </div>
         </div>
         <div class="slide">
           <div class="slide-num">Slide 03</div>
           <div class="slide-title">왜 지금, 우리 회사가?</div>
           <div class="biz-grid">
-            <div class="biz-field"><label>🚀 전략적 당위성</label><textarea id="ps-why" rows="3" placeholder="데이터나 근거를 포함하면 좋음"></textarea></div>
-            <div class="biz-field"><label>🌐 시장 / 경쟁 환경</label><textarea id="ps-market" rows="3" placeholder="업계 트렌드 및 경쟁사 동향"></textarea></div>
-            <div class="biz-field full"><label>✅ 성공을 위한 핵심 조건</label><textarea id="ps-condition" rows="2" placeholder="예) 부사장급 스폰서십, 전담 TF 구성, 6개월 내 MVP"></textarea></div>
+            <div class="biz-field"><label>🚀 전략적 당위성</label><textarea id="ps-why" rows="3" placeholder="데이터나 근거를 포함하면 좋음" oninput="onDraftChange()"></textarea></div>
+            <div class="biz-field"><label>🌐 시장 / 경쟁 환경</label><textarea id="ps-market" rows="3" placeholder="업계 트렌드 및 경쟁사 동향" oninput="onDraftChange()"></textarea></div>
+            <div class="biz-field full"><label>✅ 성공을 위한 핵심 지표 / 기능</label><textarea id="ps-condition" rows="2" placeholder="예) 첫 응답률 95% 이상, 월간 활성 사용자 목표 달성, 핵심 기능 3가지 구현 완료" oninput="onDraftChange()"></textarea></div>
           </div>
         </div>
         <div class="slide">
@@ -803,7 +1234,30 @@ select option{background:var(--surface2);}
           <div class="ai-status" id="ai-status"></div>
           <div id="ai-msg-output" class="ai-output" style="display:none;margin-top:12px"></div>
         </div>
+        <!-- 최종 제출 -->
+        <div class="slide" style="border-color:rgba(110,231,183,0.4);">
+          <div class="slide-num">최종 제출</div>
+          <div class="slide-title" style="color:var(--accent2)">발표자료 최종 제출</div>
+          <p style="font-size:13px;color:var(--text2);margin-bottom:14px;line-height:1.6;">
+            위 내용을 검토한 후 최종 제출하세요.<br>
+            조별로 1개만 저장되며, 재제출 시 덮어쓰기됩니다.
+          </p>
+          <button class="final-submit-btn" id="final-submit-btn" onclick="submitFinalPresentation()">
+            📋 최종 자료 제출하기 →
+          </button>
+        </div>
       </div>
+    </div>
+  </div>
+
+  <!-- ⑤ 최종 발표자료 -->
+  <div class="screen" id="screen-final">
+    <div class="final-wrap">
+      <div class="form-header" style="margin-bottom:28px;">
+        <h1 style="font-size:26px;">최종 발표자료</h1>
+        <p>각 조가 제출한 최종 발표자료입니다. 실시간으로 업데이트됩니다.</p>
+      </div>
+      <div id="final-cards"><div class="empty-msg">아직 제출된 최종 발표자료가 없습니다.</div></div>
     </div>
   </div>
 
@@ -827,13 +1281,14 @@ window.pickTag = function(el, group) {
 };
 window.go = function(screen) {
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
-  const order = ['form','view','eval','present'];
+  const order = ['form','view','eval','present','final'];
   document.querySelectorAll('.nav-btn').forEach((b,i)=>{ if(order[i]===screen) b.classList.add('active'); });
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
   document.getElementById('screen-'+screen).classList.add('active');
   if(screen==='view')    window.renderView?.();
   if(screen==='eval')    window.renderEval?.();
   if(screen==='present') window.renderPresentSelector?.();
+  if(screen==='final')   window.renderFinal?.();
 };
 let timerSec=300, timerInt;
 function startTimer() {
