@@ -295,6 +295,15 @@ window.switchViewTab = function(tab) {
 };
 
 window.renderView = function() {
+  if(!currentUser.isAdmin) {
+    // 참가자: 본인 조 탭만 표시, 전체 탭 숨김
+    _curTab = currentUser.group;
+    document.getElementById('view-all-panel').style.display   = 'none';
+    document.getElementById('view-group-panel').style.display = 'block';
+    renderGroupPanel(currentUser.group);
+    return;
+  }
+  // 운영자: 전체 탭 모두 표시
   document.getElementById('view-all-panel').style.display   = _curTab==='all'?'block':'none';
   document.getElementById('view-group-panel').style.display = _curTab!=='all'?'block':'none';
   if(_curTab==='all') renderDashPanel(); else renderGroupPanel(_curTab);
@@ -312,8 +321,8 @@ function renderGroupPanel(group) {
     <div class="stat-card"><div class="num">${ec}</div><div class="lbl">평가 수</div></div>`;
   const el = document.getElementById('group-ideas');
   if(!arr.length){el.innerHTML='<div class="empty-msg">이 조의 아이디어가 없습니다.</div>';return;}
-  // 전체 조원 아이디어 표시
-  const visible = arr;
+  // 참가자: 본인 아이디어만 / 운영자: 조 전체
+  const visible = currentUser.isAdmin ? arr : arr.filter(i=>i.name===currentUser.name);
   el.innerHTML = visible.map(idea=>{
     const avg2=getAvgScore(idea.key);const ee=ea.filter(e=>e.ideaKey===idea.key);
     return `<div class="idea-card${idea.isSample?' sample-card':''}">
@@ -398,7 +407,10 @@ window.renderEval = function() {
   const el = document.getElementById('eval-cards');
   if(!currentUser){el.innerHTML='<div class="empty-msg">로그인이 필요합니다.</div>';return;}
   const myGroup  = currentUser.group;
-  const filtered = getAllIdeas().filter(i=>i.group===myGroup&&!i.isSample);
+  // 참가자: 본인 조 아이디어만 / 운영자: 전체 조 아이디어
+  const filtered = currentUser.isAdmin
+    ? getAllIdeas().filter(i=>!i.isSample)
+    : getAllIdeas().filter(i=>i.group===myGroup&&!i.isSample);
   if(!filtered.length){el.innerHTML=`<div class="empty-msg">${myGroup}의 아이디어가 없습니다.<br>① 탭에서 먼저 아이디어를 제출해주세요.</div>`;return;}
   el.innerHTML = filtered.map(idea=>{
     const existing   = getMyEval(idea.key);
@@ -438,7 +450,9 @@ window.setEvalScore = function(ideaKey,cKey,val,el){
 
 // ━━━ 발표 ━━━
 window.renderPresentSelector = function(){
-  const arr = getAllIdeas().filter(i=>!i.isSample);
+  const allReal = getAllIdeas().filter(i=>!i.isSample);
+  // 참가자: 본인 조 아이디어만 / 운영자: 전체
+  const arr = currentUser.isAdmin ? allReal : allReal.filter(i=>i.group===currentUser.group);
 
   // 순위 계산
   const ranked = arr.map(idea=>{
@@ -655,7 +669,9 @@ window.renderFinal = function() {
   const el = document.getElementById('final-cards');
   if(!el) return;
   const realEntries = Object.values(finalPresentations);
-  const entries = realEntries.length > 0 ? realEntries : Object.values(SAMPLE_FINAL);
+  const allEntries  = realEntries.length > 0 ? realEntries : Object.values(SAMPLE_FINAL);
+  // 참가자: 본인 조 발표자료만 / 운영자: 전체
+  const entries = currentUser.isAdmin ? allEntries : allEntries.filter(e=>e.group===currentUser.group);
   if(!entries.length) {
     el.innerHTML = '<div class="empty-msg">아직 제출된 최종 발표자료가 없습니다.</div>';
     return;
@@ -1131,7 +1147,7 @@ select option{background:var(--surface2);}
   <!-- ② 아이디어 현황 -->
   <div class="screen" id="screen-view">
     <div class="dash-wrap">
-      <div class="view-tabs">
+      <div class="view-tabs admin-only">
         <button class="view-tab active" onclick="switchViewTab('all')">전체 현황</button>
         <button class="view-tab" onclick="switchViewTab('1조')">1조</button>
         <button class="view-tab" onclick="switchViewTab('2조')">2조</button>
