@@ -964,7 +964,8 @@ window.clearAllData=async function(){
 <style>
 :root{--bg:#f5f6fa;--surface:#ffffff;--surface2:#f0f2f8;--border:rgba(0,0,0,0.08);--border2:rgba(0,0,0,0.14);--accent:#2563eb;--accent2:#059669;--accent3:#d97706;--text:#111827;--text2:#4b5563;--text3:#9ca3af;--success:#10b981;--radius:12px;--radius-sm:8px;}
 *{box-sizing:border-box;margin:0;padding:0;}
-body{font-family:'Pretendard',-apple-system,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;font-size:16px;}
+body{font-family:'Pretendard',-apple-system,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;font-size:16px;overflow-x:hidden;}
+*{min-width:0;}
 
 /* 로그인 */
 #screen-login{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;}
@@ -1338,15 +1339,47 @@ select option{background:var(--surface2);}
   .eval-admin-summary{padding:14px 14px;}
   .eval-summary-table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch;}
 
-  /* 발표 구체화 */
+  /* 발표 구체화 — 오버플로우 방지 */
+  .present-wrap{overflow-x:hidden;}
+  .eval-info-box{overflow:hidden;}
+
+  /* 슬라이드 */
+  .slide{padding:14px 12px;overflow:hidden;}
+  .slide-title{font-size:18px;word-break:keep-all;overflow-wrap:break-word;}
+
+  /* 아이디어 선택 목록 */
+  .present-idea-list{overflow:hidden;}
+  .present-idea-row{flex-direction:column;align-items:flex-start;gap:6px;overflow:hidden;}
+  .present-idea-left{width:100%;min-width:0;overflow:hidden;}
+  .present-idea-title{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;font-size:15px;}
+  .present-idea-name{font-size:12px;}
+  .present-idea-right{align-self:flex-start;flex-wrap:wrap;gap:4px;}
+  .present-score{font-size:14px;}
+  .present-rank{font-size:12px;}
+  .present-grade{font-size:12px;}
+  .rank-medal{font-size:16px;}
+
+  /* 점수 배지 */
+  .ps-score-badge{flex-wrap:wrap;gap:6px;overflow:hidden;}
+  .ps-score-num{font-size:20px;}
+  .ps-eval-cnt{margin-left:0;}
+
+  /* 협업 바 */
+  .collab-bar{flex-direction:column;align-items:flex-start;gap:6px;}
+  .collab-status{margin-left:0;font-size:12px;word-break:break-all;}
+
+  /* 폼 그리드 */
   .biz-grid{grid-template-columns:1fr;}
   .biz-field.full{grid-column:1;}
-  .slide{padding:18px 16px;}
-  .collab-bar{flex-direction:column;align-items:flex-start;gap:6px;}
-  .collab-status{margin-left:0;}
-  .ps-score-badge{flex-wrap:wrap;gap:6px;}
-  .present-idea-row{flex-direction:column;align-items:flex-start;gap:6px;}
-  .present-idea-right{align-self:flex-end;}
+  .biz-field textarea,.biz-field input{font-size:16px;} /* iOS 줌 방지 */
+
+  /* AI 출력 */
+  .ai-output{font-size:14px;word-break:break-all;overflow-wrap:break-word;white-space:pre-wrap;}
+  .generate-all-btn{font-size:15px;}
+
+  /* 드롭다운 직접선택 */
+  .present-rest-select{font-size:16px;} /* iOS 줌 방지 */
+  select{font-size:16px !important;} /* 모든 select iOS 줌 방지 */
 
   /* 최종 발표자료 */
   .final-card-header{padding:16px 16px 14px;}
