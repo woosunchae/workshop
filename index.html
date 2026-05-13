@@ -1280,6 +1280,118 @@ select option{background:var(--surface2);}
 .admin-btn{padding:6px 12px;font-size:16px;font-weight:600;font-family:inherit;border-radius:var(--radius-sm);cursor:pointer;border:1px solid var(--border2);background:var(--surface);color:var(--text2);}
 .admin-btn:hover{background:var(--surface2);}
 .admin-btn.danger{border-color:rgba(248,113,113,.4);color:#f87171;}
+
+/* ═══════════════════════════════════════════════
+   반응형 레이아웃
+═══════════════════════════════════════════════ */
+
+/* 태블릿 (~ 900px) */
+@media (max-width: 900px) {
+  .dash-top{grid-template-columns:repeat(2,1fr);}
+  .final-grid{grid-template-columns:1fr;}
+  .final-grid .final-field.full{grid-column:1;}
+  .biz-grid{grid-template-columns:1fr;}
+  .biz-field.full{grid-column:1;}
+  .iep-grid{grid-template-columns:1fr;}
+  .iep-field.full{grid-column:1;}
+  .final-wrap{padding:24px 16px 80px;}
+  .final-card-header{padding:20px 20px 16px;}
+  .final-body{padding:20px 20px 24px;}
+  .final-card-title{font-size:20px;}
+  .eval-summary-table{font-size:13px;}
+  .eval-summary-table th,.eval-summary-table td{padding:8px 8px;}
+}
+
+/* 모바일 (~ 640px) */
+@media (max-width: 640px) {
+  /* 네비게이션 */
+  .nav{padding:0 10px;gap:0;height:auto;flex-wrap:wrap;padding-top:8px;padding-bottom:8px;}
+  .nav-logo{font-size:14px;margin-right:8px;flex-shrink:0;}
+  .nav-btn{padding:5px 7px;font-size:12px;}
+  .nav-spacer{display:none;}
+  .nav-user-wrap{margin-left:auto;}
+  .nav-status{display:none;}
+
+  /* 래퍼 패딩 */
+  .form-wrap{padding:20px 14px 80px;}
+  .dash-wrap{padding:16px 14px;}
+  .eval-wrap{padding:16px 14px 80px;}
+  .present-wrap{padding:16px 14px 80px;}
+  .final-wrap{padding:16px 12px 80px;}
+
+  /* 로그인 */
+  .login-card{padding:28px 20px;}
+  .login-card h1{font-size:22px;}
+
+  /* 통계 카드 */
+  .group-stats,.dash-top{grid-template-columns:repeat(2,1fr);}
+  .stat-card .num{font-size:22px;}
+
+  /* 아이디어 카드 */
+  .idea-fields{grid-template-columns:1fr;}
+  .idea-field.full{grid-column:1;}
+  .idea-card-top{flex-direction:column;gap:8px;}
+  .idea-title{font-size:16px;}
+
+  /* 평가 */
+  .criteria-grid{grid-template-columns:1fr;}
+  .eval-admin-summary{padding:14px 14px;}
+  .eval-summary-table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch;}
+
+  /* 발표 구체화 */
+  .biz-grid{grid-template-columns:1fr;}
+  .biz-field.full{grid-column:1;}
+  .slide{padding:18px 16px;}
+  .collab-bar{flex-direction:column;align-items:flex-start;gap:6px;}
+  .collab-status{margin-left:0;}
+  .ps-score-badge{flex-wrap:wrap;gap:6px;}
+  .present-idea-row{flex-direction:column;align-items:flex-start;gap:6px;}
+  .present-idea-right{align-self:flex-end;}
+
+  /* 최종 발표자료 */
+  .final-card-header{padding:16px 16px 14px;}
+  .final-body{padding:16px 16px 20px;}
+  .final-card-title{font-size:18px;}
+  .final-card-header-top{flex-wrap:wrap;gap:8px;}
+  .final-action-btns{margin-left:0;width:100%;}
+  .final-edit-btn,.final-del-btn{flex:1;text-align:center;}
+  .final-grid{grid-template-columns:1fr;}
+  .final-grid .final-field.full{grid-column:1;}
+  .final-score-row{flex-wrap:wrap;gap:8px;}
+  .final-criteria-row{margin-left:0;}
+  .final-speech-text{font-size:15px;}
+  .iep-grid{grid-template-columns:1fr;}
+  .iep-field.full{grid-column:1;}
+
+  /* 순위 테이블 */
+  .rank-table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch;font-size:13px;}
+  .rank-table th,.rank-table td{padding:7px 8px;}
+
+  /* 클러스터 */
+  .cluster-group-header{flex-wrap:wrap;}
+  .cluster-idea-row{flex-wrap:wrap;gap:4px;}
+
+  /* 어드민 바 */
+  .admin-bar{flex-wrap:wrap;gap:6px;padding:8px 12px;}
+  .admin-spacer{display:none;}
+  .admin-label{display:none;}
+
+  /* 드롭다운 메뉴 */
+  .nav-user-menu{right:0;min-width:160px;}
+
+  /* 주제 선택 카드 */
+  .topic-card{padding:12px 12px;}
+  .topic-card-title{font-size:13px;}
+  .topic-card-hmw{font-size:11px;}
+  .hmw-box{padding:12px 14px;}
+  .hmw-q{font-size:14px;}
+
+  /* 폼 */
+  .step-label{font-size:11px;}
+  .tag{font-size:12px;padding:4px 9px;}
+  .submit-btn{font-size:16px;}
+  .success-card{padding:28px 16px;}
+}
 </style>
 </head>
 <body>
