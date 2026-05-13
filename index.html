@@ -1064,7 +1064,7 @@ select option{background:var(--surface2);}
 .next-topic-btn{margin-top:10px;padding:11px 22px;background:var(--accent2);border:none;border-radius:var(--radius-sm);color:#0a1f17;font-size:18px;font-weight:700;font-family:inherit;cursor:pointer;width:100%;display:none;}
 
 /* 현황 */
-.dash-wrap{padding:24px 20px;max-width:1100px;margin:0 auto;}
+.dash-wrap{padding:24px 20px;max-width:1100px;margin:0 auto;overflow-x:hidden;}
 .view-tabs{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:20px;padding-bottom:12px;border-bottom:1px solid var(--border);}
 .view-tab{padding:6px 14px;border-radius:20px;font-size:16px;font-weight:500;border:1px solid var(--border2);background:var(--surface);color:var(--text2);cursor:pointer;transition:all .15s;}
 .view-tab:hover{border-color:var(--accent);color:var(--accent);}
@@ -1108,17 +1108,17 @@ select option{background:var(--surface2);}
 .cluster-group-desc{font-size:16px;opacity:.65;}
 .cluster-group-cnt{margin-left:auto;font-size:16px;opacity:.5;}
 .cluster-dot{width:8px;height:8px;border-radius:50%;}
-.cluster-group-ideas{border:1px solid var(--border);border-radius:0 0 var(--radius-sm) var(--radius-sm);overflow:hidden;}
+.cluster-group-ideas{border:1px solid var(--border);border-radius:0 0 var(--radius-sm) var(--radius-sm);overflow:visible;}
 .cluster-idea-row{display:flex;align-items:center;gap:8px;padding:9px 14px;border-bottom:1px solid var(--border);font-size:17px;}
 .cluster-idea-row:last-child{border-bottom:none;}
 .cluster-idea-row:hover{background:var(--surface2);}
-.ci-title{flex:1;font-weight:500;}
+.ci-title{flex:1;font-weight:500;min-width:0;overflow-wrap:break-word;word-break:break-all;}
 .ci-meta{font-size:14px;color:var(--text3);}
 .ci-score{font-size:16px;font-weight:700;color:var(--accent3);}
 .sample-pill{font-size:13px;background:rgba(245,158,11,0.2);color:var(--accent3);padding:1px 6px;border-radius:3px;white-space:nowrap;}
 .rank-table{width:100%;border-collapse:collapse;margin-top:8px;}
 .rank-table th{font-size:14px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;padding:8px 12px;text-align:left;border-bottom:1px solid var(--border);}
-.rank-table td{padding:10px 12px;font-size:17px;border-bottom:1px solid var(--border);vertical-align:middle;}
+.rank-table td{padding:10px 12px;font-size:17px;border-bottom:1px solid var(--border);vertical-align:middle;word-break:break-all;max-width:200px;}
 .rank-table tr:last-child td{border-bottom:none;}
 .rank-table tr:hover td{background:var(--surface2);}
 .rank-num{font-size:14px;font-weight:700;color:var(--text3);}
@@ -1402,7 +1402,9 @@ select option{background:var(--surface2);}
 
   /* 클러스터 */
   .cluster-group-header{flex-wrap:wrap;}
-  .cluster-idea-row{flex-wrap:wrap;gap:4px;}
+  .cluster-idea-row{flex-wrap:wrap;gap:4px;padding:8px 10px;}
+  .ci-title{font-size:14px;}
+  .cluster-group-header{gap:6px;padding:8px 10px;}
 
   /* 어드민 바 */
   .admin-bar{flex-wrap:wrap;gap:6px;padding:8px 12px;}
